@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-indicator"
+version = "0.1.0"
+description = "Minimal system-tray status for multiple local Codex CLI sessions"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Heimao-c"}]
+keywords = ["codex", "openai", "system-tray", "appindicator", "developer-tools"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: X11 Applications :: GTK",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development",
+]
+dependencies = []
+
+[project.optional-dependencies]
+portable-tray = [
+  "Pillow>=10.0",
+  "pystray>=0.19.5",
+  "pyobjc-framework-Cocoa>=9.0; sys_platform == 'darwin'",
+]
+build = [
+  "PyInstaller>=6.0",
+  "Pillow>=10.0",
+  "pystray>=0.19.5",
+  "pyobjc-framework-Cocoa>=9.0; sys_platform == 'darwin'",
+]
+
+[project.scripts]
+codex-indicator = "codex_indicator.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Heimao-c/codex-indicator"
+Issues = "https://github.com/Heimao-c/codex-indicator/issues"
+Source = "https://github.com/Heimao-c/codex-indicator"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+codex_indicator = ["assets/*.svg"]

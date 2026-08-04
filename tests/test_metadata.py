@@ -1,0 +1,53 @@
+import json
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+
+from codex_indicator.metadata import MetadataResolver, clean_title, project_name
+
+
+class MetadataTests(unittest.TestCase):
+    def test_reads_name_and_cwd_from_current_state_database(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            database = sqlite3.connect(home / "state_5.sqlite")
+            database.execute(
+                "CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, title TEXT, first_user_message TEXT, cwd TEXT)"
+            )
+            database.execute(
+                "INSERT INTO threads VALUES (?, ?, ?, ?, ?)",
+                ("session-1", "Explicit conversation", "Generated title", "First prompt", str(home)),
+            )
+            database.commit()
+            database.close()
+
+            result = MetadataResolver(home, cache_seconds=0).resolve("session-1", "/fallback")
+            self.assertEqual(result.title, "Explicit conversation")
+            self.assertEqual(result.cwd, str(home))
+
+    def test_falls_back_to_session_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            (home / "session_index.jsonl").write_text(
+                json.dumps({"id": "session-2", "thread_name": "Indexed title"}) + "\n",
+                encoding="utf-8",
+            )
+            result = MetadataResolver(home, cache_seconds=0).resolve("session-2", str(home))
+            self.assertEqual(result.title, "Indexed title")
+
+    def test_project_uses_git_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "robot-project"
+            nested = root / "src" / "navigation"
+            nested.mkdir(parents=True)
+            (root / ".git").mkdir()
+            self.assertEqual(project_name(str(nested)), "robot-project")
+
+    def test_title_is_single_line_and_bounded(self) -> None:
+        self.assertEqual(clean_title("a\n\tb"), "a b")
+        self.assertEqual(len(clean_title("x" * 200, limit=20)), 20)
+
+
+if __name__ == "__main__":
+    unittest.main()
