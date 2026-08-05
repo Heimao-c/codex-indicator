@@ -45,6 +45,7 @@ class StateStore:
             turn_id=str(payload["turn_id"]) if payload.get("turn_id") else None,
             pid=pid if pid is not None else find_codex_ancestor(),
             terminal_id=terminal_identity(environment),
+            thread_id=session_id,
         )
         self.write(state)
         return state
@@ -72,7 +73,7 @@ class StateStore:
                 continue
             if state.status == SessionStatus.CLOSED and not include_closed:
                 continue
-            if state.pid and not pid_is_alive(state.pid):
+            if state.pid and not state.source_host and not pid_is_alive(state.pid):
                 continue
             if not state.pid and current_time - state.updated_at > stale_without_pid_seconds:
                 continue
@@ -81,6 +82,39 @@ class StateStore:
 
     def clear(self) -> None:
         for path in self.root.glob("*.json"):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def delete(self, session_id: str) -> None:
+        try:
+            self._path(session_id).unlink()
+        except FileNotFoundError:
+            pass
+
+    def prune_discovered(self, active_session_ids: set[str]) -> None:
+        """Drop snapshots tied to terminals that are no longer live.
+
+        Hook subprocesses can occasionally report the long-lived app-server PID instead of
+        the TUI PID. A terminal identity plus absence from the passive process scan is the
+        reliable closed-window signal in that case.
+        """
+        for path in self.root.glob("*.json"):
+            try:
+                state = SessionState.from_dict(json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if state.session_id in active_session_ids:
+                continue
+            passive_snapshot = state.event in {"PassiveDiscovery", "RemoteDiscovery"}
+            inactive_local_hook = (
+                not state.source_host
+                and state.terminal_id is not None
+                and state.event not in {"PassiveDiscovery", "RemoteDiscovery"}
+            )
+            if not passive_snapshot and not inactive_local_hook:
+                continue
             try:
                 path.unlink()
             except FileNotFoundError:

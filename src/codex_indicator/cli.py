@@ -44,10 +44,15 @@ def dump_status() -> int:
     payload = [
         {
             "session_id": item.session_id,
+            "thread_id": item.thread_id,
             "status": item.status.value,
             "project": item.project,
             "title": item.title,
             "cwd": item.cwd,
+            "source": item.source_host or "local",
+            "terminal_id": item.terminal_id,
+            "window_id": hex(item.window_id) if item.window_id is not None else None,
+            "window_title": item.window_title,
             "updated_at": item.updated_at,
         }
         for item in sessions

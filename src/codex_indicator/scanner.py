@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from codex_indicator.models import SessionState, SessionStatus
+from codex_indicator.remote import LinuxRemoteScanner
 from codex_indicator.state_store import StateStore
 
 
@@ -26,6 +27,13 @@ class DiscoveredSession:
     rollout_path: Path
     status: SessionStatus
     updated_at: float
+    source_host: str | None = None
+    title: str | None = None
+    project: str | None = None
+
+    @property
+    def state_id(self) -> str:
+        return f"ssh:{self.source_host}:{self.session_id}" if self.source_host else self.session_id
 
 
 class LinuxSessionScanner:
@@ -96,6 +104,14 @@ class LinuxSessionScanner:
         return True
 
     @staticmethod
+    def _terminal_from_tty(process_root: Path) -> str | None:
+        try:
+            target = os.readlink(process_root / "fd" / "0")
+        except OSError:
+            return None
+        return f"TTY:{target}" if target.startswith("/dev/pts/") else None
+
+    @staticmethod
     def _terminal_from_environ(path: Path) -> str | None:
         try:
             values = path.read_bytes().split(b"\0")
@@ -117,24 +133,43 @@ class LinuxSessionScanner:
         return None
 
     @staticmethod
+    def _is_root_rollout(path: Path) -> bool:
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as source:
+                record = json.loads(source.readline())
+        except (OSError, json.JSONDecodeError, TypeError):
+            return True
+        payload = record.get("payload") if isinstance(record, dict) else None
+        if not isinstance(payload, dict):
+            return True
+        source = payload.get("source")
+        return not payload.get("parent_thread_id") and not (
+            isinstance(source, dict) and source.get("subagent")
+        )
+
+    @staticmethod
     def _rollout_from_fds(fd_root: Path) -> Path | None:
         try:
             entries = list(fd_root.iterdir())
         except OSError:
             return None
+        candidates: list[tuple[float, Path, bool]] = []
         for entry in entries:
             try:
                 target = Path(os.readlink(entry))
+                modified = target.stat().st_mtime
             except OSError:
                 continue
             if SESSION_ID.search(target.name) and "sessions" in target.parts:
-                return target
-        return None
+                candidates.append((modified, target, LinuxSessionScanner._is_root_rollout(target)))
+        roots = [item for item in candidates if item[2]]
+        selected = max(roots or candidates, default=(0.0, None, True), key=lambda item: item[0])
+        return selected[1]
 
     def discover(self) -> list[DiscoveredSession]:
         if sys.platform != "linux" and self.proc_root == Path("/proc"):
             return []
-        discovered: list[DiscoveredSession] = []
+        by_terminal: dict[str, DiscoveredSession] = {}
         try:
             process_dirs = list(self.proc_root.iterdir())
         except OSError:
@@ -148,6 +183,11 @@ class LinuxSessionScanner:
                 continue
             if name not in {"codex", "codex.exe", "codex-cli", "codex-cli.exe"}:
                 continue
+            terminal_id = self._terminal_from_tty(process_root)
+            if not terminal_id:
+                # app-server/IDE helper processes can hold several rollout files but
+                # do not represent a terminal the user asked us to display.
+                continue
             rollout = self._rollout_from_fds(process_root / "fd")
             if not rollout:
                 continue
@@ -159,41 +199,75 @@ class LinuxSessionScanner:
                 updated_at = rollout.stat().st_mtime
             except OSError:
                 continue
-            discovered.append(
-                DiscoveredSession(
-                    session_id=match.group(1),
-                    pid=int(process_root.name),
-                    cwd=cwd,
-                    terminal_id=self._terminal_from_environ(process_root / "environ"),
-                    rollout_path=rollout,
-                    status=self.infer_status(rollout),
-                    updated_at=updated_at,
-                )
+            item = DiscoveredSession(
+                session_id=match.group(1),
+                pid=int(process_root.name),
+                cwd=cwd,
+                terminal_id=terminal_id,
+                rollout_path=rollout,
+                status=self.infer_status(rollout),
+                updated_at=updated_at,
             )
-        return discovered
+            previous = by_terminal.get(terminal_id)
+            if not previous or item.updated_at > previous.updated_at:
+                by_terminal[terminal_id] = item
+        return list(by_terminal.values())
 
-    def reconcile(self, store: StateStore) -> None:
+    def reconcile(self, store: StateStore, remote: LinuxRemoteScanner | None = None) -> None:
         existing = {state.session_id: state for state in store.list_states(include_closed=True)}
-        for item in self.discover():
-            previous = existing.get(item.session_id)
-            if previous and previous.event != "PassiveDiscovery":
+        discovered = self.discover()
+        if remote:
+            for item in remote.discover():
+                discovered.append(
+                    DiscoveredSession(
+                        session_id=item.session_id,
+                        pid=item.pid,
+                        cwd=item.cwd,
+                        terminal_id=item.terminal_id,
+                        rollout_path=Path("/remote") / item.session_id,
+                        status=item.status,
+                        updated_at=item.updated_at,
+                        source_host=item.host,
+                        title=item.title,
+                        project=item.project,
+                    )
+                )
+        active_ids = {item.state_id for item in discovered}
+        store.prune_discovered(active_ids)
+        for item in discovered:
+            previous = existing.get(item.state_id)
+            if (
+                not item.source_host
+                and previous
+                and previous.event not in {"PassiveDiscovery", "RemoteDiscovery"}
+                and previous.pid == item.pid
+            ):
+                # Official lifecycle hooks are more precise than rollout inference,
+                # especially while Codex is paused at PermissionRequest.
                 continue
             if (
                 previous
                 and previous.pid == item.pid
                 and previous.status == item.status
                 and previous.updated_at == item.updated_at
+                and previous.terminal_id == item.terminal_id
+                and previous.display_title == item.title
+                and previous.display_project == item.project
             ):
                 continue
             store.write(
                 SessionState(
-                    session_id=item.session_id,
+                    session_id=item.state_id,
                     status=item.status,
                     cwd=item.cwd,
-                    event="PassiveDiscovery",
+                    event="RemoteDiscovery" if item.source_host else "PassiveDiscovery",
                     updated_at=item.updated_at,
                     pid=item.pid,
                     terminal_id=item.terminal_id,
+                    thread_id=item.session_id,
+                    source_host=item.source_host,
+                    display_title=item.title,
+                    display_project=item.project,
                 )
             )
 
@@ -203,6 +277,7 @@ class PassiveScanner:
         self.interval_seconds = interval_seconds
         self._last_scan = 0.0
         self._scanner = LinuxSessionScanner() if sys.platform == "linux" else None
+        self._remote = LinuxRemoteScanner() if sys.platform == "linux" else None
 
     def reconcile(self, store: StateStore) -> None:
         if not self._scanner:
@@ -211,4 +286,4 @@ class PassiveScanner:
         if now - self._last_scan < self.interval_seconds:
             return
         self._last_scan = now
-        self._scanner.reconcile(store)
+        self._scanner.reconcile(store, self._remote)

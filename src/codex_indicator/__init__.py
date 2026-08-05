@@ -1,3 +1,3 @@
-"""Minimal system-tray status monitor for local Codex CLI sessions."""
+"""Minimal system-tray manager for local and SSH Codex CLI sessions."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

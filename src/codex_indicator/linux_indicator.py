@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import html
 import logging
 from importlib.resources import as_file, files
 from typing import Callable
 
 from codex_indicator import __version__
 from codex_indicator import autostart, hooks
-from codex_indicator.i18n import SYMBOLS, status_text, text
+from codex_indicator.i18n import COLOR_SYMBOLS, STATUS_COLORS, text
 from codex_indicator.models import SessionStatus
+from codex_indicator.presentation import session_row, shorten
 from codex_indicator.service import SessionService, SessionView
 
 
@@ -45,11 +47,34 @@ class LinuxIndicatorApp:
         item.set_sensitive(False)
         return item
 
-    @staticmethod
-    def _row(session: SessionView) -> str:
-        title = session.title if len(session.title) <= 76 else f"{session.title[:75].rstrip()}…"
-        project = session.project if len(session.project) <= 24 else f"{session.project[:23]}…"
-        return f"{SYMBOLS[session.status]} {status_text(session.status)} · {project} — {title}"
+    def _session_item(self, session: SessionView) -> object:
+        item = self.Gtk.MenuItem()
+        label = self.Gtk.Label()
+        label.set_xalign(0)
+        label.set_markup(
+            f'<span foreground="{STATUS_COLORS[session.status]}">'
+            f'{html.escape(session_row(session))}</span>'
+        )
+        item.add(label)
+        item.connect("activate", self._focus, session)
+        return item
+
+    def _management_item(self, session: SessionView) -> object:
+        label = f"{session.project} — {shorten(session.title, 14)}"
+        item = self.Gtk.MenuItem(label=label)
+        actions = self.Gtk.Menu()
+        rename_item = self.Gtk.MenuItem(label=text("rename"))
+        rename_item.connect("activate", self._rename, session)
+        actions.append(rename_item)
+        archive_item = self.Gtk.MenuItem(label=text("archive"))
+        archive_item.connect("activate", self._archive, session)
+        actions.append(archive_item)
+        actions.append(self.Gtk.SeparatorMenuItem())
+        new_item = self.Gtk.MenuItem(label=text("new_here"))
+        new_item.connect("activate", self._new_terminal, session)
+        actions.append(new_item)
+        item.set_submenu(actions)
+        return item
 
     def _run_safely(self, operation: Callable[[], None], success: str) -> None:
         try:
@@ -63,6 +88,94 @@ class LinuxIndicatorApp:
 
     def _install_hooks(self, *_args: object) -> None:
         self._run_safely(hooks.install, text("hooks_installed"))
+
+    def _new_terminal(self, _item: object, session: SessionView | None = None) -> None:
+        self._run_safely(lambda: self.service.new_terminal(session), text("new_terminal"))
+
+    def _focus(self, _item: object, session: SessionView) -> None:
+        self._run_safely(lambda: self.service.focus(session), text("focus_success"))
+
+    def _approve_all(self, _item: object, sessions: list[SessionView]) -> None:
+        pending = [session for session in sessions if session.status == SessionStatus.ATTENTION]
+        if not pending:
+            self._message = text("approve_all_none")
+            self._fingerprint = None
+            self._refresh()
+            return
+        dialog = self.Gtk.MessageDialog(
+            flags=self.Gtk.DialogFlags.MODAL,
+            message_type=self.Gtk.MessageType.WARNING,
+            buttons=self.Gtk.ButtonsType.NONE,
+            text=text("approve_all_title"),
+        )
+        dialog.format_secondary_text(text("approve_all_confirm").format(count=len(pending)))
+        dialog.add_button(text("cancel"), self.Gtk.ResponseType.CANCEL)
+        dialog.add_button(text("approve_all_button"), self.Gtk.ResponseType.OK)
+        response = dialog.run()
+        dialog.destroy()
+        if response != self.Gtk.ResponseType.OK:
+            return
+        try:
+            result = self.service.approve_all(pending)
+            if result.errors:
+                self._message = text("approve_all_errors").format(
+                    approved=result.approved,
+                    errors=len(result.errors),
+                )
+            elif result.skipped:
+                self._message = text("approve_all_partial").format(
+                    approved=result.approved,
+                    skipped=result.skipped,
+                )
+            elif result.approved:
+                self._message = text("approve_all_success").format(approved=result.approved)
+            else:
+                self._message = text("approve_all_none")
+        except Exception as error:
+            LOG.exception("Could not approve pending Codex requests")
+            self._message = str(error)
+        self._fingerprint = None
+        self._refresh()
+
+    def _rename(self, _item: object, session: SessionView) -> None:
+        dialog = self.Gtk.Dialog(title=text("rename_title"), flags=self.Gtk.DialogFlags.MODAL)
+        dialog.add_button(text("cancel"), self.Gtk.ResponseType.CANCEL)
+        dialog.add_button(text("save"), self.Gtk.ResponseType.OK)
+        box = dialog.get_content_area()
+        prompt = self.Gtk.Label(label=text("rename_prompt"))
+        prompt.set_xalign(0)
+        entry = self.Gtk.Entry()
+        entry.set_text(session.title)
+        entry.set_activates_default(True)
+        dialog.set_default_response(self.Gtk.ResponseType.OK)
+        box.set_spacing(8)
+        box.set_border_width(12)
+        box.add(prompt)
+        box.add(entry)
+        dialog.show_all()
+        entry.grab_focus()
+        entry.select_region(0, -1)
+        response = dialog.run()
+        name = entry.get_text().strip()
+        dialog.destroy()
+        if response == self.Gtk.ResponseType.OK and name:
+            self._run_safely(lambda: self.service.rename(session, name), text("rename_success"))
+
+    def _archive(self, _item: object, session: SessionView) -> None:
+        message = text("archive_confirm").format(title=shorten(session.title, 28))
+        dialog = self.Gtk.MessageDialog(
+            flags=self.Gtk.DialogFlags.MODAL,
+            message_type=self.Gtk.MessageType.WARNING,
+            buttons=self.Gtk.ButtonsType.NONE,
+            text=text("archive_title"),
+        )
+        dialog.format_secondary_text(message)
+        dialog.add_button(text("cancel"), self.Gtk.ResponseType.CANCEL)
+        dialog.add_button(text("archive").rstrip("…"), self.Gtk.ResponseType.OK)
+        response = dialog.run()
+        dialog.destroy()
+        if response == self.Gtk.ResponseType.OK:
+            self._run_safely(lambda: self.service.archive(session), text("archive_success"))
 
     def _toggle_autostart(self, item: object) -> None:
         active = bool(item.get_active())
@@ -82,13 +195,30 @@ class LinuxIndicatorApp:
         menu.append(self.Gtk.SeparatorMenuItem())
         if sessions:
             for session in sessions[:30]:
-                menu.append(self._disabled_item(self._row(session)))
+                menu.append(self._session_item(session))
         else:
             menu.append(self._disabled_item(text("no_sessions")))
+        if self.service.supports_approvals and any(
+            session.status == SessionStatus.ATTENTION for session in sessions
+        ):
+            menu.append(self.Gtk.SeparatorMenuItem())
+            approve_item = self.Gtk.MenuItem(label=text("approve_all"))
+            approve_item.connect("activate", self._approve_all, sessions)
+            menu.append(approve_item)
         if self._message:
             menu.append(self.Gtk.SeparatorMenuItem())
             menu.append(self._disabled_item(self._message))
         menu.append(self.Gtk.SeparatorMenuItem())
+        if sessions:
+            manage_item = self.Gtk.MenuItem(label=text("manage"))
+            manage_menu = self.Gtk.Menu()
+            for session in sessions[:30]:
+                manage_menu.append(self._management_item(session))
+            manage_item.set_submenu(manage_menu)
+            menu.append(manage_item)
+        new_item = self.Gtk.MenuItem(label=text("new_terminal"))
+        new_item.connect("activate", self._new_terminal)
+        menu.append(new_item)
         hook_label = text("hooks_installed") if hooks.is_installed() else text("hooks_install")
         hook_item = self.Gtk.MenuItem(label=hook_label)
         hook_item.connect("activate", self._install_hooks)
@@ -115,14 +245,22 @@ class LinuxIndicatorApp:
         done = counts[SessionStatus.DONE]
         parts = []
         if working:
-            parts.append(f"●{working}")
+            parts.append(f"{COLOR_SYMBOLS[SessionStatus.WORKING]}{working}")
         if attention:
-            parts.append(f"◐{attention}")
+            parts.append(f"{COLOR_SYMBOLS[SessionStatus.ATTENTION]}{attention}")
         if done:
-            parts.append(f"✓{done}")
+            parts.append(f"{COLOR_SYMBOLS[SessionStatus.DONE]}{done}")
         label = " C " + (" ".join(parts) if parts else "0")
-        self.indicator.set_label(label, " C ●99 ◐99 ✓99")
-        icon = "codex-indicator-attention" if attention else "codex-indicator-symbolic"
+        self.indicator.set_label(label, " C 🟢99 🟠99 🔵99")
+        icon = (
+            "codex-indicator-attention"
+            if attention
+            else "codex-indicator-working"
+            if working
+            else "codex-indicator-done"
+            if done
+            else "codex-indicator-idle"
+        )
         self.indicator.set_icon_full(icon, "Codex Indicator")
 
     def _refresh(self) -> bool:
