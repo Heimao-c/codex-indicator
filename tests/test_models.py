@@ -6,7 +6,7 @@ from codex_indicator.models import SessionStatus, status_for_event
 class EventStatusTests(unittest.TestCase):
     def test_core_lifecycle(self) -> None:
         cases = {
-            "SessionStart": SessionStatus.IDLE,
+            "SessionStart": SessionStatus.DONE,
             "UserPromptSubmit": SessionStatus.WORKING,
             "PermissionRequest": SessionStatus.ATTENTION,
             "PostToolUse": SessionStatus.WORKING,

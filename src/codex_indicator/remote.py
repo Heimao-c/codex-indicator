@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 import time
@@ -22,6 +23,8 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 
@@ -73,14 +76,15 @@ def infer_status(path):
     return "attention" if pending else meaningful
 
 
-def active_ttys():
+def login_ttys():
     source_ip = (os.environ.get("SSH_CONNECTION") or "").split()
     source_ip = source_ip[0] if source_ip else ""
     try:
-        output = subprocess.run(["who"], capture_output=True, text=True, timeout=1).stdout
+        output = subprocess.run(["who", "-u"], capture_output=True, text=True, timeout=1).stdout
     except Exception:
-        return set()
-    result = set()
+        return {}, set()
+    by_source_port = {}
+    visible = set()
     for line in output.splitlines():
         fields = line.split()
         if len(fields) < 2:
@@ -88,8 +92,35 @@ def active_ttys():
         origin = fields[-1].strip("()") if fields[-1].startswith("(") else ""
         if source_ip and origin and origin != source_ip:
             continue
-        result.add(fields[1])
-    return result
+        tty = fields[1]
+        visible.add(tty)
+        login_pid = next((int(value) for value in reversed(fields[2:]) if value.isdigit()), 0)
+        if not login_pid:
+            continue
+        try:
+            environment = (Path("/proc") / str(login_pid) / "environ").read_bytes().split(b"\0")
+            values = {}
+            for item in environment:
+                key, separator, value = item.partition(b"=")
+                if separator:
+                    values[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
+            connection = values.get("SSH_CONNECTION", "").split()
+            login_tty = values.get("SSH_TTY", "").removeprefix("/dev/") or tty
+            if len(connection) >= 2:
+                by_source_port[int(connection[1])] = login_tty
+        except Exception:
+            continue
+    return by_source_port, visible
+
+
+def process_started(pid_root):
+    try:
+        fields = (pid_root / "stat").read_text().split()
+        started_ticks = int(fields[21])
+        uptime = float(Path("/proc/uptime").read_text().split()[0])
+        return time.time() - uptime + started_ticks / os.sysconf("SC_CLK_TCK")
+    except Exception:
+        return time.time()
 
 
 def rollout_for(pid_root):
@@ -130,6 +161,18 @@ def clean(value):
     return " ".join(str(value or "").split())
 
 
+def project_name(cwd):
+    current = Path(cwd).expanduser()
+    project = current.name or str(current)
+    candidate = current
+    while True:
+        if (candidate / ".git").exists():
+            return candidate.name or str(candidate)
+        if candidate.parent == candidate:
+            return project
+        candidate = candidate.parent
+
+
 def metadata(home, session_id, fallback_cwd):
     title = ""
     stored_cwd = ""
@@ -160,20 +203,19 @@ def metadata(home, session_id, fallback_cwd):
         except Exception:
             pass
     cwd = stored_cwd or fallback_cwd
-    current = Path(cwd).expanduser()
-    project = current.name or str(current)
-    candidate = current
-    while True:
-        if (candidate / ".git").exists():
-            project = candidate.name or str(candidate)
-            break
-        if candidate.parent == candidate:
-            break
-        candidate = candidate.parent
-    return title or ("Session " + session_id[:8]), project, cwd
+    return title or ("Session " + session_id[:8]), project_name(cwd), cwd
 
 
-logged_ttys = active_ttys()
+try:
+    requested_ports = {int(key): value for key, value in json.loads(sys.argv[1]).items()}
+except Exception:
+    requested_ports = {}
+port_ttys, logged_ttys = login_ttys()
+remote_to_local = {
+    remote_tty: requested_ports[source_port]
+    for source_port, remote_tty in port_ttys.items()
+    if source_port in requested_ports
+}
 home = Path.home() / ".codex"
 by_tty = {}
 for name in os.listdir("/proc"):
@@ -187,26 +229,39 @@ for name in os.listdir("/proc"):
         if not tty_path.startswith("/dev/pts/"):
             continue
         tty = tty_path.removeprefix("/dev/")
-        if logged_ttys and tty not in logged_ttys:
+        if remote_to_local and tty not in remote_to_local:
+            continue
+        if not remote_to_local and logged_ttys and tty not in logged_ttys:
             continue
         rollout = rollout_for(root)
-        if not rollout:
-            continue
-        updated_at, rollout_path, session_id, _is_root = rollout
         cwd = os.readlink(root / "cwd")
     except OSError:
         continue
-    title, project, resolved_cwd = metadata(home, session_id, cwd)
+    placeholder = rollout is None
+    if rollout:
+        updated_at, rollout_path, session_id, _is_root = rollout
+        title, project, resolved_cwd = metadata(home, session_id, cwd)
+        status = infer_status(rollout_path)
+    else:
+        updated_at = process_started(root)
+        rollout_path = ""
+        session_id = "process-%s-%s" % (name, tty.replace("/", "-"))
+        title = "Codex terminal " + tty
+        project = project_name(cwd)
+        resolved_cwd = cwd
+        status = "done"
     item = {
         "session_id": session_id,
         "pid": int(name),
         "tty": tty,
         "cwd": resolved_cwd,
         "rollout_path": str(rollout_path),
-        "status": infer_status(rollout_path),
+        "status": status,
         "updated_at": updated_at,
         "title": title,
         "project": project,
+        "local_tty": remote_to_local.get(tty, ""),
+        "manageable": not placeholder,
     }
     if tty not in by_tty or item["updated_at"] > by_tty[tty]["updated_at"]:
         by_tty[tty] = item
@@ -218,6 +273,7 @@ print(json.dumps(list(by_tty.values()), ensure_ascii=False))
 class SshConnection:
     host: str
     local_tty: str
+    source_port: int | None = None
 
 
 @dataclass(frozen=True)
@@ -231,12 +287,43 @@ class RemoteSession:
     title: str
     project: str
     host: str
+    manageable: bool = True
 
 
 SSH_OPTIONS_WITH_VALUE = {
     "-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L",
     "-l", "-m", "-O", "-o", "-p", "-Q", "-R", "-S", "-W", "-w",
 }
+
+
+def _socket_source_port(process_root: Path) -> int | None:
+    inodes: set[str] = set()
+    try:
+        descriptors = list((process_root / "fd").iterdir())
+    except OSError:
+        return None
+    for descriptor in descriptors:
+        try:
+            target = os.readlink(descriptor)
+        except OSError:
+            continue
+        match = re.fullmatch(r"socket:\[(\d+)\]", target)
+        if match:
+            inodes.add(match.group(1))
+    for table in (process_root / "net" / "tcp", process_root / "net" / "tcp6"):
+        try:
+            lines = table.read_text(encoding="utf-8", errors="replace").splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            fields = line.split()
+            if len(fields) < 10 or fields[3] != "01" or fields[9] not in inodes:
+                continue
+            try:
+                return int(fields[1].rsplit(":", 1)[1], 16)
+            except (IndexError, ValueError):
+                continue
+    return None
 
 
 def ssh_target(argv: list[str]) -> str | None:
@@ -284,18 +371,33 @@ class LinuxRemoteScanner:
             host = ssh_target(argv)
             if not host:
                 continue
-            connection = SshConnection(host=host, local_tty=tty)
+            connection = SshConnection(
+                host=host,
+                local_tty=tty,
+                source_port=_socket_source_port(root),
+            )
             found[(host, tty)] = connection
         return list(found.values())
 
     @staticmethod
-    def _probe(connection: SshConnection) -> list[RemoteSession]:
-        remote_command = "python3 -c " + shlex.quote(REMOTE_PROBE)
+    def _probe(host: str, connections: list[SshConnection]) -> list[RemoteSession]:
+        port_ttys = {
+            str(connection.source_port): connection.local_tty
+            for connection in connections
+            if connection.source_port is not None
+        }
+        remote_command = " ".join(
+            (
+                "python3 -c",
+                shlex.quote(REMOTE_PROBE),
+                shlex.quote(json.dumps(port_ttys, ensure_ascii=True)),
+            )
+        )
         try:
             result = subprocess.run(
                 [
                     "ssh", "-T", "-o", "ClearAllForwardings=yes", "-o", "BatchMode=yes",
-                    "-o", "ConnectTimeout=3", "-o", "LogLevel=ERROR", connection.host,
+                    "-o", "ConnectTimeout=3", "-o", "LogLevel=ERROR", host,
                     remote_command,
                 ],
                 check=False,
@@ -304,32 +406,35 @@ class LinuxRemoteScanner:
                 timeout=5,
             )
         except (OSError, subprocess.SubprocessError):
-            LOG.debug("Could not query remote Codex sessions on %s", connection.host, exc_info=True)
+            LOG.debug("Could not query remote Codex sessions on %s", host, exc_info=True)
             return []
         if result.returncode != 0:
-            LOG.debug("Remote Codex query failed on %s: %s", connection.host, result.stderr.strip())
+            LOG.debug("Remote Codex query failed on %s: %s", host, result.stderr.strip())
             return []
         try:
             payload = json.loads(result.stdout)
         except (json.JSONDecodeError, TypeError):
-            LOG.debug("Remote Codex query returned invalid JSON from %s", connection.host)
+            LOG.debug("Remote Codex query returned invalid JSON from %s", host)
             return []
         sessions: list[RemoteSession] = []
+        fallback_local_tty = connections[0].local_tty if len(connections) == 1 else "unknown"
         for value in payload if isinstance(payload, list) else []:
             try:
                 status = SessionStatus(str(value["status"]))
                 remote_tty = str(value["tty"])
+                local_tty = str(value.get("local_tty") or fallback_local_tty)
                 sessions.append(
                     RemoteSession(
                         session_id=str(value["session_id"]),
                         pid=int(value["pid"]),
                         cwd=str(value.get("cwd") or ""),
-                        terminal_id=f"SSH:{connection.local_tty}:{connection.host}:{remote_tty}",
+                        terminal_id=f"SSH:{local_tty}:{host}:{remote_tty}",
                         status=status,
                         updated_at=float(value.get("updated_at") or time.time()),
                         title=str(value.get("title") or ""),
                         project=str(value.get("project") or "—"),
-                        host=connection.host,
+                        host=host,
+                        manageable=bool(value.get("manageable", True)),
                     )
                 )
             except (KeyError, TypeError, ValueError):
@@ -341,12 +446,11 @@ class LinuxRemoteScanner:
         if not force and now - self._cached_at < self.cache_seconds:
             return list(self._cached)
         sessions: dict[tuple[str, str], RemoteSession] = {}
-        probed_hosts: set[str] = set()
+        by_host: dict[str, list[SshConnection]] = {}
         for connection in self.connections():
-            if connection.host in probed_hosts:
-                continue
-            probed_hosts.add(connection.host)
-            for session in self._probe(connection):
+            by_host.setdefault(connection.host, []).append(connection)
+        for host, connections in by_host.items():
+            for session in self._probe(host, connections):
                 key = (session.host, session.session_id)
                 previous = sessions.get(key)
                 if not previous or session.updated_at > previous.updated_at:

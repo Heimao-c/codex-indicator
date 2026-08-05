@@ -31,6 +31,7 @@ class SessionView:
     pid: int | None = None
     window_id: int | None = None
     window_title: str | None = None
+    manageable: bool = True
 
     @property
     def location(self) -> str:
@@ -81,6 +82,7 @@ class SessionService:
                     source_host=state.source_host,
                     terminal_id=state.terminal_id,
                     pid=state.pid,
+                    manageable=state.manageable,
                 )
             )
         views.sort(key=lambda item: (STATUS_ORDER[item.status], -item.updated_at, item.project.lower()))
@@ -91,6 +93,8 @@ class SessionService:
                 status=(
                     SessionStatus.ATTENTION
                     if matched_windows.get(item.session_id) and matched_windows[item.session_id].needs_attention
+                    else SessionStatus.WORKING
+                    if matched_windows.get(item.session_id) and matched_windows[item.session_id].is_working
                     else item.status
                 ),
                 window_id=matched_windows[item.session_id].window_id if item.session_id in matched_windows else None,
@@ -119,17 +123,22 @@ class SessionService:
                 item.title,
                 item.source_host,
                 item.window_id,
+                item.manageable,
                 int(item.updated_at),
             )
             for item in sessions
         )
 
     def rename(self, session: SessionView, name: str) -> None:
+        if not session.manageable:
+            raise RuntimeError("该终端尚未暴露可管理的 Codex 对话 ID")
         CodexAppServerClient(session.source_host).rename(session.thread_id, name)
         self.metadata.invalidate(session.thread_id)
         self._title_overrides[session.session_id] = " ".join(name.split()).strip()
 
     def archive(self, session: SessionView) -> None:
+        if not session.manageable:
+            raise RuntimeError("该终端尚未暴露可管理的 Codex 对话 ID")
         CodexAppServerClient(session.source_host).archive(session.thread_id)
         self.store.delete(session.session_id)
         self._title_overrides.pop(session.session_id, None)
@@ -147,8 +156,16 @@ class SessionService:
     def supports_approvals(self) -> bool:
         return self.approvals.supported
 
-    def approve_all(self, sessions: list[SessionView] | None = None) -> ApprovalBatchResult:
-        return self.approvals.approve_all(sessions if sessions is not None else self.sessions())
+    def approve_all(
+        self,
+        sessions: list[SessionView] | None = None,
+        *,
+        allow_high_risk: bool = False,
+    ) -> ApprovalBatchResult:
+        return self.approvals.approve_all(
+            sessions if sessions is not None else self.sessions(),
+            allow_high_risk=allow_high_risk,
+        )
 
     @staticmethod
     def new_terminal(session: SessionView | None = None) -> None:

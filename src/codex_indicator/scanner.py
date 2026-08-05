@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from codex_indicator.models import SessionState, SessionStatus
@@ -30,6 +30,9 @@ class DiscoveredSession:
     source_host: str | None = None
     title: str | None = None
     project: str | None = None
+    manageable: bool = True
+    event: str | None = None
+    thread_id: str | None = None
 
     @property
     def state_id(self) -> str:
@@ -133,6 +136,18 @@ class LinuxSessionScanner:
         return None
 
     @staticmethod
+    def _process_started(process_root: Path) -> float:
+        """Return a process start time, using a safe fallback for synthetic proc trees."""
+        try:
+            fields = (process_root / "stat").read_text(encoding="utf-8", errors="replace").split()
+            started_ticks = int(fields[21])
+            uptime = float((process_root.parent / "uptime").read_text(encoding="utf-8").split()[0])
+            ticks_per_second = os.sysconf("SC_CLK_TCK")
+            return time.time() - uptime + started_ticks / ticks_per_second
+        except (OSError, IndexError, ValueError, TypeError, AttributeError):
+            return time.time()
+
+    @staticmethod
     def _is_root_rollout(path: Path) -> bool:
         try:
             with path.open("r", encoding="utf-8", errors="replace") as source:
@@ -189,24 +204,37 @@ class LinuxSessionScanner:
                 # do not represent a terminal the user asked us to display.
                 continue
             rollout = self._rollout_from_fds(process_root / "fd")
-            if not rollout:
-                continue
-            match = SESSION_ID.search(rollout.name)
-            if not match:
-                continue
             try:
                 cwd = os.readlink(process_root / "cwd")
-                updated_at = rollout.stat().st_mtime
             except OSError:
                 continue
+            match = SESSION_ID.search(rollout.name) if rollout else None
+            if match:
+                updated_at = rollout.stat().st_mtime
+                session_id = match.group(1)
+                status = self.infer_status(rollout)
+                manageable = True
+                rollout_path = rollout
+            else:
+                # Newer Codex versions may keep rollout files in the app-server
+                # process instead of the TUI. Keep the live TTY visible as a
+                # placeholder; reconcile() will bind it to the precise hook
+                # session when one exists for the same working directory.
+                updated_at = self._process_started(process_root)
+                tty_name = terminal_id.removeprefix("TTY:/dev/").replace("/", "-")
+                session_id = f"process-{process_root.name}-{tty_name}"
+                status = SessionStatus.DONE
+                manageable = False
+                rollout_path = process_root / "no-rollout"
             item = DiscoveredSession(
-                session_id=match.group(1),
+                session_id=session_id,
                 pid=int(process_root.name),
                 cwd=cwd,
                 terminal_id=terminal_id,
-                rollout_path=rollout,
-                status=self.infer_status(rollout),
+                rollout_path=rollout_path,
+                status=status,
                 updated_at=updated_at,
+                manageable=manageable,
             )
             previous = by_terminal.get(terminal_id)
             if not previous or item.updated_at > previous.updated_at:
@@ -230,8 +258,60 @@ class LinuxSessionScanner:
                         source_host=item.host,
                         title=item.title,
                         project=item.project,
+                        manageable=item.manageable,
+                        event=None,
+                        thread_id=item.session_id,
                     )
                 )
+
+        # Hooks can be emitted by a long-lived app-server and therefore carry
+        # its PID/terminal identity rather than the foreground TUI's. Bind a
+        # no-rollout placeholder to the matching live hook state by cwd so the
+        # current conversation remains visible and clickable.
+        concrete_ids = {
+            item.session_id
+            for item in discovered
+            if item.manageable and not item.source_host
+        }
+        hook_states = [
+            state
+            for state in existing.values()
+            if not state.source_host
+            and state.session_id not in concrete_ids
+            and state.event not in {"PassiveDiscovery", "RemoteDiscovery"}
+            and state.status != SessionStatus.CLOSED
+            and state.cwd
+        ]
+        claimed: set[str] = set()
+        resolved: list[DiscoveredSession] = []
+        for item in discovered:
+            if item.source_host or item.manageable:
+                resolved.append(item)
+                continue
+            candidates = [
+                state
+                for state in hook_states
+                if state.session_id not in claimed and state.cwd == item.cwd
+            ]
+            candidate = max(candidates, key=lambda state: state.updated_at, default=None)
+            if candidate is None:
+                resolved.append(item)
+                continue
+            claimed.add(candidate.session_id)
+            resolved.append(
+                replace(
+                    item,
+                    session_id=candidate.session_id,
+                    status=candidate.status,
+                    updated_at=candidate.updated_at,
+                    title=candidate.display_title,
+                    project=candidate.display_project,
+                    manageable=True,
+                    event=candidate.event,
+                    thread_id=candidate.thread_id or candidate.session_id,
+                )
+            )
+        discovered = resolved
         active_ids = {item.state_id for item in discovered}
         store.prune_discovered(active_ids)
         for item in discovered:
@@ -241,6 +321,11 @@ class LinuxSessionScanner:
                 and previous
                 and previous.event not in {"PassiveDiscovery", "RemoteDiscovery"}
                 and previous.pid == item.pid
+                and (
+                    previous.terminal_id is None
+                    or previous.terminal_id == item.terminal_id
+                    or item.event is None
+                )
             ):
                 # Official lifecycle hooks are more precise than rollout inference,
                 # especially while Codex is paused at PermissionRequest.
@@ -253,6 +338,9 @@ class LinuxSessionScanner:
                 and previous.terminal_id == item.terminal_id
                 and previous.display_title == item.title
                 and previous.display_project == item.project
+                and previous.manageable == item.manageable
+                and previous.event == (item.event or ("RemoteDiscovery" if item.source_host else "PassiveDiscovery"))
+                and previous.thread_id == (item.thread_id or item.session_id)
             ):
                 continue
             store.write(
@@ -260,14 +348,15 @@ class LinuxSessionScanner:
                     session_id=item.state_id,
                     status=item.status,
                     cwd=item.cwd,
-                    event="RemoteDiscovery" if item.source_host else "PassiveDiscovery",
+                    event=item.event or ("RemoteDiscovery" if item.source_host else "PassiveDiscovery"),
                     updated_at=item.updated_at,
                     pid=item.pid,
                     terminal_id=item.terminal_id,
-                    thread_id=item.session_id,
+                    thread_id=item.thread_id or item.session_id,
                     source_host=item.source_host,
                     display_title=item.title,
                     display_project=item.project,
+                    manageable=item.manageable,
                 )
             )
 
