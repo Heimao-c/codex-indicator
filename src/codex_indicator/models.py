@@ -8,7 +8,6 @@ from typing import Any, Mapping
 class SessionStatus(str, Enum):
     ATTENTION = "attention"
     WORKING = "working"
-    IDLE = "idle"
     DONE = "done"
     UNKNOWN = "unknown"
     CLOSED = "closed"
@@ -18,9 +17,8 @@ STATUS_ORDER = {
     SessionStatus.ATTENTION: 0,
     SessionStatus.WORKING: 1,
     SessionStatus.DONE: 2,
-    SessionStatus.IDLE: 3,
-    SessionStatus.UNKNOWN: 4,
-    SessionStatus.CLOSED: 5,
+    SessionStatus.UNKNOWN: 3,
+    SessionStatus.CLOSED: 4,
 }
 
 
@@ -34,7 +32,7 @@ def status_for_event(event: str, payload: Mapping[str, Any]) -> SessionStatus:
     if event == "Stop":
         return SessionStatus.DONE
     if event == "SessionStart":
-        return SessionStatus.WORKING if payload.get("source") == "compact" else SessionStatus.IDLE
+        return SessionStatus.WORKING if payload.get("source") == "compact" else SessionStatus.DONE
     if event in {
         "UserPromptSubmit",
         "PreToolUse",
@@ -62,6 +60,7 @@ class SessionState:
     source_host: str | None = None
     display_title: str | None = None
     display_project: str | None = None
+    manageable: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -71,9 +70,13 @@ class SessionState:
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "SessionState":
         pid = value.get("pid")
+        raw_status = str(value.get("status", "unknown"))
+        # Migrate state files written by versions that exposed "idle".
+        if raw_status == "idle":
+            raw_status = SessionStatus.DONE.value
         return cls(
             session_id=str(value["session_id"]),
-            status=SessionStatus(str(value.get("status", "unknown"))),
+            status=SessionStatus(raw_status),
             cwd=str(value.get("cwd", "")),
             event=str(value.get("event", "")),
             updated_at=float(value.get("updated_at", 0.0)),
@@ -84,4 +87,5 @@ class SessionState:
             source_host=str(value["source_host"]) if value.get("source_host") else None,
             display_title=str(value["display_title"]) if value.get("display_title") else None,
             display_project=str(value["display_project"]) if value.get("display_project") else None,
+            manageable=bool(value.get("manageable", True)),
         )

@@ -26,7 +26,7 @@ class PortableTrayApp:
         self.ImageDraw = ImageDraw
         self.service = service or SessionService()
         self.icon = pystray.Icon("codex-indicator")
-        self.icon.icon = self._image("idle")
+        self.icon.icon = self._image("neutral")
         self.icon.title = "Codex Indicator"
         self.icon.menu = self._menu([])
         self._stop = threading.Event()
@@ -37,7 +37,7 @@ class PortableTrayApp:
             "attention": (232, 170, 20, 255),
             "working": (48, 173, 94, 255),
             "done": (61, 120, 216, 255),
-            "idle": (105, 112, 122, 255),
+            "neutral": (105, 112, 122, 255),
         }
         image = self.Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         draw = self.ImageDraw.Draw(image)
@@ -95,9 +95,13 @@ class PortableTrayApp:
         rows.extend(
             [
                 Menu.SEPARATOR,
-                *([self._management_menu(sessions)] if sessions else []),
+                *(
+                    [self._management_menu([session for session in sessions if session.manageable])]
+                    if any(session.manageable for session in sessions)
+                    else []
+                ),
                 Item(text("new_terminal"), lambda *_args: self._new_terminal()),
-                Item(text("hooks_installed") if hooks.is_installed() else text("hooks_install"), self._install_hooks),
+                Item(text("hooks_repair") if hooks.is_installed() else text("hooks_install"), self._install_hooks),
                 Item(text("autostart"), self._toggle_autostart, checked=lambda _item: autostart.is_enabled()),
                 Item(text("refresh"), self._refresh_clicked),
                 Menu.SEPARATOR,
@@ -166,15 +170,32 @@ class PortableTrayApp:
         root = tkinter.Tk()
         root.withdraw()
         try:
-            confirmed = messagebox.askyesno(
-                text("approve_all_title"),
-                text("approve_all_confirm").format(count=len(pending)),
-                parent=root,
-            )
-            if not confirmed:
-                return
             result = self.service.approve_all(pending)
-            if result.errors:
+            if result.high_risk:
+                details = "\n".join(
+                    f"• {item.session.location}/{item.session.project}: {shorten(item.summary, 120)}"
+                    for item in result.high_risk[:8]
+                )
+                confirmed = messagebox.askyesno(
+                    text("approve_high_risk_title"),
+                    text("approve_high_risk_confirm").format(
+                        count=len(result.high_risk),
+                        details=details,
+                    ),
+                    parent=root,
+                )
+                if confirmed:
+                    high_risk_result = self.service.approve_all(
+                        [item.session for item in result.high_risk],
+                        allow_high_risk=True,
+                    )
+                    result = result.merged(high_risk_result)
+            if result.high_risk:
+                message = text("approve_high_risk_deferred").format(
+                    approved=result.approved,
+                    dangerous=len(result.high_risk),
+                )
+            elif result.errors:
                 message = text("approve_all_errors").format(
                     approved=result.approved,
                     errors=len(result.errors),
@@ -235,7 +256,7 @@ class PortableTrayApp:
             if counts[SessionStatus.WORKING]
             else "done"
             if counts[SessionStatus.DONE]
-            else "idle"
+            else "neutral"
         )
         summary = f"Codex: {counts[SessionStatus.WORKING]} working, {counts[SessionStatus.ATTENTION]} attention"
         self.icon.icon = self._image(state)

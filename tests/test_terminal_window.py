@@ -11,6 +11,7 @@ from codex_indicator.terminal_window import (
     _ancestor_chain,
     _nearest_ancestor_window,
     focus_macos_terminal,
+    high_risk_approval_summary,
     is_approval_screen,
 )
 
@@ -29,6 +30,10 @@ class TerminalWindowTests(unittest.TestCase):
         ancestors = _ancestor_chain(41, {41: 30, 30: 20, 20: 0})
         self.assertEqual(ancestors, [41, 30, 20])
         self.assertEqual(_nearest_ancestor_window(ancestors, {20: [900], 30: [700]}), 700)
+
+    def test_braille_window_title_is_working(self) -> None:
+        self.assertTrue(TerminalWindow(1, "⠦ CARI4D").is_working)
+        self.assertFalse(TerminalWindow(2, "CARI4D").is_working)
 
     def test_focuses_matching_macos_terminal_tty(self) -> None:
         responses = [
@@ -84,6 +89,74 @@ class TerminalWindowTests(unittest.TestCase):
                 "Which camera should be used?\n> D435 (Recommended)\n  D455"
             )
         )
+
+    def test_high_risk_detection_is_limited_to_current_approval_pane(self) -> None:
+        destructive = (
+            "Would you like to run the following command?\n"
+            "$ sudo wipefs -a /dev/nvme0n1\n> 1. Yes, proceed"
+        )
+        self.assertIn("wipefs", high_risk_approval_summary(destructive) or "")
+        self.assertIsNone(
+            high_risk_approval_summary(
+                "Earlier: sudo wipefs -a /dev/nvme0n1\n"
+                "Would you like to run the following command?\n"
+                "$ rm -rf build\n> 1. Yes, proceed"
+            )
+        )
+        self.assertIsNotNone(
+            high_risk_approval_summary(
+                "Would you like to run the following command?\n"
+                "$ git reset --hard\n> 1. Yes, proceed"
+            )
+        )
+
+    def test_approve_all_defers_high_risk_but_approves_ordinary_requests(self) -> None:
+        active = [99]
+        activated: list[int] = []
+        pressed: list[int] = []
+        screens = {
+            1: "Would you like to run the following command?\n$ npm test\n> Yes, proceed",
+            2: "Would you like to run the following command?\n$ rm -rf /\n> Yes, proceed",
+        }
+
+        def activate(window_id: int) -> None:
+            active[0] = window_id
+            activated.append(window_id)
+
+        controller = TerminalApprovalController(
+            screen_reader=lambda window_id: screens[window_id],
+            activate=activate,
+            press_enter=lambda: pressed.append(active[0]),
+            active_window=lambda: active[0],
+            pause=lambda _seconds: None,
+        )
+        sessions = [
+            SessionView(
+                session_id=str(window_id),
+                thread_id=str(window_id),
+                status=SessionStatus.ATTENTION,
+                project="project",
+                title="approval",
+                cwd="/workspace",
+                updated_at=1,
+                window_id=window_id,
+            )
+            for window_id in (1, 2)
+        ]
+
+        first = controller.approve_all(sessions)
+        self.assertEqual(first.approved, 1)
+        self.assertEqual([item.session.session_id for item in first.high_risk], ["2"])
+        self.assertEqual(pressed, [1])
+
+        second = controller.approve_all(
+            [item.session for item in first.high_risk],
+            allow_high_risk=True,
+        )
+        combined = first.merged(second)
+        self.assertEqual(combined.approved, 2)
+        self.assertEqual(combined.high_risk, ())
+        self.assertEqual(pressed, [1, 2])
 
     def test_approve_all_targets_each_verified_attention_window_once(self) -> None:
         active = [99]

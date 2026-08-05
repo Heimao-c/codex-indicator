@@ -42,6 +42,26 @@ APPROVAL_ACCEPT_MARKERS = (
     "yes, just this once",
     "yes, grant these permissions for this turn",
 )
+HIGH_RISK_APPROVAL_PATTERNS = (
+    re.compile(r"\b(?:mkfs(?:\.[a-z0-9_-]+)?|wipefs|blkdiscard)\b", re.IGNORECASE),
+    re.compile(r"\bdd\b[^\n]*(?:\bof\s*=\s*/dev/|\bif\s*=\s*/dev/(?:zero|random|urandom))", re.IGNORECASE),
+    re.compile(r"\bshred\b[^\n]*/dev/", re.IGNORECASE),
+    re.compile(r"\bsgdisk\b[^\n]*(?:--zap-all|(?:^|\s)-z(?:\s|$))", re.IGNORECASE),
+    re.compile(r"\bparted\b[^\n]*\bmklabel\b", re.IGNORECASE),
+    re.compile(r"\b(?:format(?:\.com)?\s+[a-z]:|clear-disk\b|remove-partition\b)", re.IGNORECASE),
+    re.compile(r"\bdiskpart\b[\s\S]*?\bclean(?:\s+all)?\b", re.IGNORECASE),
+    re.compile(
+        r"\brm\s+(?=[^\n]*(?:-[^\s]*[rR][^\s]*|--recursive))[^\n]*?"
+        r"(?:^|\s)(?:--\s+)?(?:/|/(?:boot|etc|opt|root|usr|var)/?|/home(?:/[^/\s;&|]+)?/?|~/?|"
+        r"\$(?:HOME|\{HOME\})/?)(?:\*+)?(?=\s|$|[;&|])",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bfind\s+/(?:\s|[^\n]*\s)-(?:delete|exec\s+rm)\b", re.IGNORECASE),
+    re.compile(r"\bgit\s+(?:reset\s+--hard|clean\s+-[^\s]*f[^\s]*[dx]|clean\s+-[^\s]*[dx][^\s]*f)\b", re.IGNORECASE),
+    re.compile(r"\b(?:drop\s+(?:database|schema)|truncate\s+table)\b", re.IGNORECASE),
+    re.compile(r"\bterraform\s+destroy\b", re.IGNORECASE),
+    re.compile(r"\bkubectl\s+delete\s+(?:namespace|persistentvolume|persistentvolumeclaim)\b", re.IGNORECASE),
+)
 GEOMETRY_PATTERNS = {
     "x": re.compile(r"Absolute upper-left X:\s*(-?\d+)"),
     "y": re.compile(r"Absolute upper-left Y:\s*(-?\d+)"),
@@ -79,20 +99,61 @@ class TerminalWindow:
         lowered = self.title.casefold()
         return any(marker in lowered for marker in ATTENTION_MARKERS)
 
+    @property
+    def is_working(self) -> bool:
+        title = self.title.lstrip()
+        return bool(title and "\u2800" <= title[0] <= "\u28ff")
+
+
+@dataclass(frozen=True)
+class HighRiskApproval:
+    session: "SessionView"
+    summary: str
+
 
 @dataclass(frozen=True)
 class ApprovalBatchResult:
     approved: int
     skipped: int
     errors: tuple[str, ...] = ()
+    high_risk: tuple[HighRiskApproval, ...] = ()
+
+    def merged(self, other: "ApprovalBatchResult") -> "ApprovalBatchResult":
+        return ApprovalBatchResult(
+            approved=self.approved + other.approved,
+            skipped=self.skipped + other.skipped,
+            errors=(*self.errors, *other.errors),
+            high_risk=other.high_risk,
+        )
+
+
+def _approval_pane(value: str) -> str:
+    lowered = value.casefold()
+    start = max((lowered.rfind(marker) for marker in APPROVAL_PROMPT_MARKERS), default=-1)
+    return value[start:] if start >= 0 else ""
 
 
 def is_approval_screen(value: str) -> bool:
     """Return true only for Codex approve/deny panes whose first row is one-shot accept."""
-    lowered = value.casefold()
-    return any(marker in lowered for marker in APPROVAL_PROMPT_MARKERS) and any(
-        marker in lowered for marker in APPROVAL_ACCEPT_MARKERS
-    )
+    pane = _approval_pane(value).casefold()
+    return bool(pane) and any(marker in pane for marker in APPROVAL_ACCEPT_MARKERS)
+
+
+def high_risk_approval_summary(value: str) -> str | None:
+    """Return a short current-pane summary when approval may cause irreversible data loss."""
+    pane = _approval_pane(value)
+    if not pane:
+        return None
+    for pattern in HIGH_RISK_APPROVAL_PATTERNS:
+        match = pattern.search(pane)
+        if not match:
+            continue
+        line_start = pane.rfind("\n", 0, match.start()) + 1
+        line_end = pane.find("\n", match.end())
+        line = pane[line_start : line_end if line_end >= 0 else len(pane)]
+        summary = " ".join(line.split()).strip()
+        return f"{summary[:157].rstrip()}..." if len(summary) > 160 else summary
+    return None
 
 
 class TerminalWindowResolver:
@@ -143,7 +204,7 @@ class TerminalWindowResolver:
                 score += 25
             elif session.source_host:
                 score += 15
-        elif session.status in {SessionStatus.DONE, SessionStatus.IDLE}:
+        elif session.status == SessionStatus.DONE:
             score += 15
             if project and title.strip() == project:
                 score += 20
@@ -554,25 +615,41 @@ class TerminalApprovalController:
             and session_type in {"", "x11"}
         )
 
-    def approve_all(self, sessions: list["SessionView"]) -> ApprovalBatchResult:
+    def approve_all(
+        self,
+        sessions: list["SessionView"],
+        *,
+        allow_high_risk: bool = False,
+    ) -> ApprovalBatchResult:
         original_window = self.active_window()
         approved = 0
         skipped = 0
         errors: list[str] = []
+        high_risk: list[HighRiskApproval] = []
         try:
             for session in sessions:
                 if session.status != SessionStatus.ATTENTION or session.window_id is None:
                     continue
                 try:
-                    if not is_approval_screen(self.screen_reader(session.window_id)):
+                    screen = self.screen_reader(session.window_id)
+                    if not is_approval_screen(screen):
                         skipped += 1
+                        continue
+                    risk_summary = high_risk_approval_summary(screen)
+                    if risk_summary and not allow_high_risk:
+                        high_risk.append(HighRiskApproval(session=session, summary=risk_summary))
                         continue
                     self.activate(session.window_id)
                     self.pause(0.18)
                     if self.active_window() != session.window_id:
                         raise RuntimeError("无法激活对应终端")
-                    if not is_approval_screen(self.screen_reader(session.window_id)):
+                    screen = self.screen_reader(session.window_id)
+                    if not is_approval_screen(screen):
                         skipped += 1
+                        continue
+                    risk_summary = high_risk_approval_summary(screen)
+                    if risk_summary and not allow_high_risk:
+                        high_risk.append(HighRiskApproval(session=session, summary=risk_summary))
                         continue
                     self.press_enter()
                     approved += 1
@@ -586,4 +663,9 @@ class TerminalApprovalController:
                     self.activate(original_window)
                 except Exception:
                     LOG.debug("Could not restore the previously active window", exc_info=True)
-        return ApprovalBatchResult(approved=approved, skipped=skipped, errors=tuple(errors))
+        return ApprovalBatchResult(
+            approved=approved,
+            skipped=skipped,
+            errors=tuple(errors),
+            high_risk=tuple(high_risk),
+        )

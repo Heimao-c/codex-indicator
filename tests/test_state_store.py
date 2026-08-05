@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,24 @@ from codex_indicator.state_store import StateStore
 
 
 class StateStoreTests(unittest.TestCase):
+    def test_migrates_legacy_idle_state_to_done(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = StateStore(Path(temp))
+            (Path(temp) / "legacy.json").write_text(
+                json.dumps(
+                    {
+                        "session_id": "legacy",
+                        "status": "idle",
+                        "cwd": "/workspace",
+                        "event": "SessionStart",
+                        "updated_at": 1,
+                        "pid": os.getpid(),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(store.list_states()[0].status, SessionStatus.DONE)
+
     def test_records_and_reads_live_session(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = StateStore(Path(temp))

@@ -87,7 +87,14 @@ class LinuxIndicatorApp:
         self._refresh()
 
     def _install_hooks(self, *_args: object) -> None:
-        self._run_safely(hooks.install, text("hooks_installed"))
+        try:
+            hooks.install()
+            self._message = ""
+        except Exception as error:
+            LOG.exception("Could not install Codex hooks")
+            self._message = str(error)
+        self._fingerprint = None
+        self._refresh()
 
     def _new_terminal(self, _item: object, session: SessionView | None = None) -> None:
         self._run_safely(lambda: self.service.new_terminal(session), text("new_terminal"))
@@ -102,22 +109,41 @@ class LinuxIndicatorApp:
             self._fingerprint = None
             self._refresh()
             return
-        dialog = self.Gtk.MessageDialog(
-            flags=self.Gtk.DialogFlags.MODAL,
-            message_type=self.Gtk.MessageType.WARNING,
-            buttons=self.Gtk.ButtonsType.NONE,
-            text=text("approve_all_title"),
-        )
-        dialog.format_secondary_text(text("approve_all_confirm").format(count=len(pending)))
-        dialog.add_button(text("cancel"), self.Gtk.ResponseType.CANCEL)
-        dialog.add_button(text("approve_all_button"), self.Gtk.ResponseType.OK)
-        response = dialog.run()
-        dialog.destroy()
-        if response != self.Gtk.ResponseType.OK:
-            return
         try:
             result = self.service.approve_all(pending)
-            if result.errors:
+            if result.high_risk:
+                details = "\n".join(
+                    f"• {item.session.location}/{item.session.project}: {shorten(item.summary, 120)}"
+                    for item in result.high_risk[:8]
+                )
+                dialog = self.Gtk.MessageDialog(
+                    flags=self.Gtk.DialogFlags.MODAL,
+                    message_type=self.Gtk.MessageType.WARNING,
+                    buttons=self.Gtk.ButtonsType.NONE,
+                    text=text("approve_high_risk_title"),
+                )
+                dialog.format_secondary_text(
+                    text("approve_high_risk_confirm").format(
+                        count=len(result.high_risk),
+                        details=details,
+                    )
+                )
+                dialog.add_button(text("cancel"), self.Gtk.ResponseType.CANCEL)
+                dialog.add_button(text("approve_high_risk_button"), self.Gtk.ResponseType.OK)
+                response = dialog.run()
+                dialog.destroy()
+                if response == self.Gtk.ResponseType.OK:
+                    high_risk_result = self.service.approve_all(
+                        [item.session for item in result.high_risk],
+                        allow_high_risk=True,
+                    )
+                    result = result.merged(high_risk_result)
+            if result.high_risk:
+                self._message = text("approve_high_risk_deferred").format(
+                    approved=result.approved,
+                    dangerous=len(result.high_risk),
+                )
+            elif result.errors:
                 self._message = text("approve_all_errors").format(
                     approved=result.approved,
                     errors=len(result.errors),
@@ -209,17 +235,18 @@ class LinuxIndicatorApp:
             menu.append(self.Gtk.SeparatorMenuItem())
             menu.append(self._disabled_item(self._message))
         menu.append(self.Gtk.SeparatorMenuItem())
-        if sessions:
+        manageable_sessions = [session for session in sessions if session.manageable]
+        if manageable_sessions:
             manage_item = self.Gtk.MenuItem(label=text("manage"))
             manage_menu = self.Gtk.Menu()
-            for session in sessions[:30]:
+            for session in manageable_sessions[:30]:
                 manage_menu.append(self._management_item(session))
             manage_item.set_submenu(manage_menu)
             menu.append(manage_item)
         new_item = self.Gtk.MenuItem(label=text("new_terminal"))
         new_item.connect("activate", self._new_terminal)
         menu.append(new_item)
-        hook_label = text("hooks_installed") if hooks.is_installed() else text("hooks_install")
+        hook_label = text("hooks_repair") if hooks.is_installed() else text("hooks_install")
         hook_item = self.Gtk.MenuItem(label=hook_label)
         hook_item.connect("activate", self._install_hooks)
         menu.append(hook_item)

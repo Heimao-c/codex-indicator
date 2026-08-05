@@ -3,7 +3,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-VERSION=${1:-0.2.0}
+VERSION=${1:-0.3.0}
 ARCH=${2:-$(dpkg --print-architecture)}
 BUILD_ROOT=${PROJECT_ROOT}/build/deb
 PACKAGE_ROOT=${BUILD_ROOT}/codex-indicator_${VERSION}_${ARCH}
