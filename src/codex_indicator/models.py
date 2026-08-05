@@ -58,6 +58,10 @@ class SessionState:
     turn_id: str | None = None
     pid: int | None = None
     terminal_id: str | None = None
+    thread_id: str | None = None
+    source_host: str | None = None
+    display_title: str | None = None
+    display_project: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -76,4 +80,8 @@ class SessionState:
             turn_id=str(value["turn_id"]) if value.get("turn_id") else None,
             pid=int(pid) if pid else None,
             terminal_id=str(value["terminal_id"]) if value.get("terminal_id") else None,
+            thread_id=str(value["thread_id"]) if value.get("thread_id") else None,
+            source_host=str(value["source_host"]) if value.get("source_host") else None,
+            display_title=str(value["display_title"]) if value.get("display_title") else None,
+            display_project=str(value["display_project"]) if value.get("display_project") else None,
         )

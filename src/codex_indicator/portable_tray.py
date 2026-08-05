@@ -5,8 +5,9 @@ import threading
 from typing import Any
 
 from codex_indicator import __version__, autostart, hooks
-from codex_indicator.i18n import SYMBOLS, status_text, text
+from codex_indicator.i18n import text
 from codex_indicator.models import SessionStatus
+from codex_indicator.presentation import session_row, shorten
 from codex_indicator.service import SessionService, SessionView
 
 
@@ -46,8 +47,32 @@ class PortableTrayApp:
 
     @staticmethod
     def _row(session: SessionView) -> str:
-        title = session.title if len(session.title) <= 72 else f"{session.title[:71].rstrip()}…"
-        return f"{SYMBOLS[session.status]} {status_text(session.status)} · {session.project} — {title}"
+        return session_row(session)
+
+    def _session_menu(self, session: SessionView) -> Any:
+        Item = self.pystray.MenuItem
+        return Item(self._row(session), lambda *_args: self._focus(session))
+
+    def _management_menu(self, sessions: list[SessionView]) -> Any:
+        Menu = self.pystray.Menu
+        Item = self.pystray.MenuItem
+        items = []
+        for session in sessions[:30]:
+            items.append(
+                Item(
+                    f"{session.project} — {shorten(session.title, 14)}",
+                    Menu(
+                        Item(text("rename"), lambda *_args, current=session: self._rename(current)),
+                        Item(text("archive"), lambda *_args, current=session: self._archive(current)),
+                        Menu.SEPARATOR,
+                        Item(text("new_here"), lambda *_args, current=session: self._new_terminal(current)),
+                    ),
+                )
+            )
+        return Item(
+            text("manage"),
+            Menu(*items),
+        )
 
     def _menu(self, sessions: list[SessionView]) -> Any:
         Menu = self.pystray.Menu
@@ -55,12 +80,23 @@ class PortableTrayApp:
         noop = lambda *_args: None
         rows = [Item(text("header"), noop, enabled=False)]
         if sessions:
-            rows.extend(Item(self._row(session), noop, enabled=False) for session in sessions[:30])
+            rows.extend(self._session_menu(session) for session in sessions[:30])
         else:
             rows.append(Item(text("no_sessions"), noop, enabled=False))
+        if self.service.supports_approvals and any(
+            session.status == SessionStatus.ATTENTION for session in sessions
+        ):
+            rows.extend(
+                [
+                    Menu.SEPARATOR,
+                    Item(text("approve_all"), lambda *_args: self._approve_all(sessions)),
+                ]
+            )
         rows.extend(
             [
                 Menu.SEPARATOR,
+                *([self._management_menu(sessions)] if sessions else []),
+                Item(text("new_terminal"), lambda *_args: self._new_terminal()),
                 Item(text("hooks_installed") if hooks.is_installed() else text("hooks_install"), self._install_hooks),
                 Item(text("autostart"), self._toggle_autostart, checked=lambda _item: autostart.is_enabled()),
                 Item(text("refresh"), self._refresh_clicked),
@@ -70,6 +106,100 @@ class PortableTrayApp:
             ]
         )
         return Menu(*rows)
+
+    def _focus(self, session: SessionView) -> None:
+        try:
+            self.service.focus(session)
+        except Exception:
+            LOG.exception("Could not focus Codex terminal")
+
+    @staticmethod
+    def _dialog_modules() -> tuple[Any, Any, Any]:
+        import tkinter
+        from tkinter import messagebox, simpledialog
+
+        return tkinter, messagebox, simpledialog
+
+    def _rename(self, session: SessionView) -> None:
+        tkinter, _messagebox, simpledialog = self._dialog_modules()
+        root = tkinter.Tk()
+        root.withdraw()
+        try:
+            name = simpledialog.askstring(
+                text("rename_title"), text("rename_prompt"), initialvalue=session.title, parent=root
+            )
+        finally:
+            root.destroy()
+        if not name or not name.strip():
+            return
+        try:
+            self.service.rename(session, name)
+        except Exception:
+            LOG.exception("Could not rename Codex conversation")
+        self._refresh(force=True)
+
+    def _archive(self, session: SessionView) -> None:
+        tkinter, messagebox, _simpledialog = self._dialog_modules()
+        root = tkinter.Tk()
+        root.withdraw()
+        try:
+            confirmed = messagebox.askyesno(
+                text("archive_title"),
+                text("archive_confirm").format(title=shorten(session.title, 28)),
+                parent=root,
+            )
+        finally:
+            root.destroy()
+        if not confirmed:
+            return
+        try:
+            self.service.archive(session)
+        except Exception:
+            LOG.exception("Could not archive Codex conversation")
+        self._refresh(force=True)
+
+    def _approve_all(self, sessions: list[SessionView]) -> None:
+        pending = [session for session in sessions if session.status == SessionStatus.ATTENTION]
+        if not pending:
+            return
+        tkinter, messagebox, _simpledialog = self._dialog_modules()
+        root = tkinter.Tk()
+        root.withdraw()
+        try:
+            confirmed = messagebox.askyesno(
+                text("approve_all_title"),
+                text("approve_all_confirm").format(count=len(pending)),
+                parent=root,
+            )
+            if not confirmed:
+                return
+            result = self.service.approve_all(pending)
+            if result.errors:
+                message = text("approve_all_errors").format(
+                    approved=result.approved,
+                    errors=len(result.errors),
+                )
+            elif result.skipped:
+                message = text("approve_all_partial").format(
+                    approved=result.approved,
+                    skipped=result.skipped,
+                )
+            elif result.approved:
+                message = text("approve_all_success").format(approved=result.approved)
+            else:
+                message = text("approve_all_none")
+            messagebox.showinfo(text("approve_all_title"), message, parent=root)
+        except Exception:
+            LOG.exception("Could not approve pending Codex requests")
+        finally:
+            root.destroy()
+        self._refresh(force=True)
+
+    def _new_terminal(self, session: SessionView | None = None) -> None:
+        try:
+            self.service.new_terminal(session)
+        except Exception:
+            LOG.exception("Could not open Codex terminal")
 
     def _install_hooks(self, _icon: Any, _item: Any) -> None:
         try:

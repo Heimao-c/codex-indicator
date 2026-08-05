@@ -112,7 +112,7 @@ def enable(arguments: list[str] | None = None) -> None:
             "Icon=codex-indicator-symbolic",
             "Terminal=false",
             "X-GNOME-Autostart-enabled=true",
-            "Comment=Show local Codex CLI session status",
+            "Comment=Show and manage Codex CLI session status",
             "",
         )
     )

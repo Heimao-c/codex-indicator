@@ -22,6 +22,8 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean --windowed --onedir --name CodexIndicator --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets;codex_indicator/assets" src/codex_indicator/__main__.py
           pyinstaller --noconfirm --clean --console --onedir --name CodexIndicatorHook --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets;codex_indicator/assets" src/codex_indicator/__main__.py
+          if (-not (Test-Path dist/CodexIndicator/CodexIndicator.exe)) { throw "Tray executable was not built" }
+          & dist/CodexIndicatorHook/CodexIndicatorHook.exe --version
           New-Item -ItemType Directory -Path bundle
           Move-Item dist/CodexIndicator bundle/CodexIndicator
           Move-Item dist/CodexIndicatorHook bundle/CodexIndicatorHook
@@ -32,7 +34,15 @@ jobs:
           path: codex-indicator-windows-x64.zip
 
   build-macos:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            architecture: arm64
+          - os: macos-15-intel
+            architecture: x64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,14 +53,16 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean --windowed --onedir --name CodexIndicator --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets:codex_indicator/assets" src/codex_indicator/__main__.py
           pyinstaller --noconfirm --clean --console --onedir --name CodexIndicatorHook --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets:codex_indicator/assets" src/codex_indicator/__main__.py
+          test -d dist/CodexIndicator.app
+          dist/CodexIndicatorHook/CodexIndicatorHook --version
           mkdir bundle
           mv dist/CodexIndicator.app bundle/
           mv dist/CodexIndicatorHook bundle/
-          ditto -c -k --sequesterRsrc --keepParent bundle codex-indicator-macos.zip
+          ditto -c -k --sequesterRsrc --keepParent bundle codex-indicator-macos-${{ matrix.architecture }}.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: codex-indicator-macos
-          path: codex-indicator-macos.zip
+          name: codex-indicator-macos-${{ matrix.architecture }}
+          path: codex-indicator-macos-${{ matrix.architecture }}.zip
 
   build-ubuntu:
     runs-on: ubuntu-22.04

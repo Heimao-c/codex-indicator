@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codex_indicator.models import SessionStatus
+from codex_indicator.models import SessionState, SessionStatus
 from codex_indicator.state_store import StateStore
 
 
@@ -42,6 +42,30 @@ class StateStoreTests(unittest.TestCase):
             store = StateStore(Path(temp))
             self.assertIsNone(store.record_hook({"hook_event_name": "Stop"}))
             self.assertEqual(store.list_states(), [])
+
+    def test_prunes_stale_discovery_and_closed_hook_terminal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = StateStore(Path(temp))
+            for session_id, event, terminal_id in (
+                ("active", "PassiveDiscovery", "TTY:/dev/pts/1"),
+                ("stale", "PassiveDiscovery", "TTY:/dev/pts/2"),
+                ("closed-hook", "Stop", "GNOME_TERMINAL_SCREEN:/screen/closed"),
+                ("headless-hook", "Stop", None),
+            ):
+                store.write(
+                    SessionState(
+                        session_id=session_id,
+                        status=SessionStatus.DONE,
+                        cwd="/workspace",
+                        event=event,
+                        updated_at=1,
+                        pid=os.getpid(),
+                        terminal_id=terminal_id,
+                    )
+                )
+            store.prune_discovered({"active"})
+            ids = {state.session_id for state in store.list_states()}
+            self.assertEqual(ids, {"active", "headless-hook"})
 
 
 if __name__ == "__main__":

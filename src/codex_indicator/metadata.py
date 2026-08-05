@@ -38,8 +38,11 @@ def project_name(cwd: str) -> str:
         pass
     candidate = current
     while True:
-        if (candidate / ".git").exists():
-            return candidate.name or str(candidate)
+        try:
+            if (candidate / ".git").exists():
+                return candidate.name or str(candidate)
+        except OSError:
+            break
         if candidate.parent == candidate:
             break
         candidate = candidate.parent
@@ -51,6 +54,9 @@ class MetadataResolver:
         self.home = home or codex_home()
         self.cache_seconds = cache_seconds
         self._cache: dict[str, tuple[float, SessionMetadata]] = {}
+
+    def invalidate(self, session_id: str) -> None:
+        self._cache.pop(session_id, None)
 
     def resolve(self, session_id: str, fallback_cwd: str) -> SessionMetadata:
         cached = self._cache.get(session_id)

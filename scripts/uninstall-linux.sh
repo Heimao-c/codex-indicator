@@ -14,8 +14,9 @@ fi
 
 rm -f "$BIN_PATH"
 rm -f "$DATA_HOME/applications/codex-indicator.desktop"
-rm -f "$DATA_HOME/icons/hicolor/scalable/apps/codex-indicator-symbolic.svg"
-rm -f "$DATA_HOME/icons/hicolor/scalable/apps/codex-indicator-attention.svg"
+for icon in symbolic attention working done idle; do
+    rm -f "$DATA_HOME/icons/hicolor/scalable/apps/codex-indicator-${icon}.svg"
+done
 rm -rf "$DATA_HOME/codex-indicator"
 
 printf '%s\n' 'Codex Indicator was removed. Session-status cache was kept in the platform state directory.'

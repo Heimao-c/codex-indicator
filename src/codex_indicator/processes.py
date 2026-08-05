@@ -72,6 +72,13 @@ def _windows_parent_map() -> dict[int, int]:
         ]
 
     kernel32 = ctypes.windll.kernel32
+    kernel32.CreateToolhelp32Snapshot.argtypes = [ctypes.c_ulong, ctypes.c_ulong]
+    kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+    kernel32.Process32FirstW.argtypes = [ctypes.c_void_p, ctypes.POINTER(PROCESSENTRY32W)]
+    kernel32.Process32FirstW.restype = ctypes.c_bool
+    kernel32.Process32NextW.argtypes = [ctypes.c_void_p, ctypes.POINTER(PROCESSENTRY32W)]
+    kernel32.Process32NextW.restype = ctypes.c_bool
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
     snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
     if snapshot == ctypes.c_void_p(-1).value:
         return {}
@@ -123,6 +130,11 @@ def pid_is_alive(pid: int | None) -> bool:
         return False
     if sys.platform == "win32":
         kernel32 = ctypes.windll.kernel32
+        kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_bool, ctypes.c_ulong]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        kernel32.GetExitCodeProcess.restype = ctypes.c_bool
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
         handle = kernel32.OpenProcess(0x1000, False, pid)
         if not handle:
             return False
