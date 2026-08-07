@@ -7,7 +7,11 @@ import sys
 from pathlib import Path
 
 
-def _looks_like_codex(name: str, command: str) -> bool:
+CODEX_COMM_NAMES = {"codex", "codex.exe", "codex-cli", "codex-cli.exe"}
+CLAUDE_COMM_NAMES = {"claude", "claude.exe"}
+
+
+def _looks_like_agent(name: str, command: str) -> bool:
     name = name.lower().strip()
     command = command.lower()
     if (
@@ -17,9 +21,9 @@ def _looks_like_codex(name: str, command: str) -> bool:
         or "codexindicator" in command
     ):
         return False
-    if name in {"codex", "codex.exe", "codex-cli", "codex-cli.exe"}:
+    if name in CODEX_COMM_NAMES | CLAUDE_COMM_NAMES:
         return True
-    return "@openai/codex" in command or "/codex" in command or "\\codex" in command
+    return "@openai/codex" in command or "/codex" in command or "\\codex" in command or "/claude" in command
 
 
 def _linux_process_info(pid: int) -> tuple[int, str, str] | None:
@@ -98,7 +102,8 @@ def _windows_parent_map() -> dict[int, int]:
     return mapping
 
 
-def find_codex_ancestor(start_pid: int | None = None) -> int | None:
+def find_agent_ancestor(start_pid: int | None = None) -> int | None:
+    """Find the nearest Codex or Claude Code process in the parent chain."""
     pid = start_pid or os.getppid()
     seen: set[int] = set()
     if sys.platform == "win32":
@@ -107,7 +112,7 @@ def find_codex_ancestor(start_pid: int | None = None) -> int | None:
         while pid > 0 and pid not in seen:
             seen.add(pid)
             name = names.get(pid, "")
-            if _looks_like_codex(name, name):
+            if _looks_like_agent(name, name):
                 return pid
             pid = mapping.get(pid, 0)
         return None
@@ -119,10 +124,14 @@ def find_codex_ancestor(start_pid: int | None = None) -> int | None:
         if not info:
             break
         parent, name, command = info
-        if _looks_like_codex(name, command):
+        if _looks_like_agent(name, command):
             return pid
         pid = parent
     return None
+
+
+def find_codex_ancestor(start_pid: int | None = None) -> int | None:
+    return find_agent_ancestor(start_pid)
 
 
 def pid_is_alive(pid: int | None) -> bool:

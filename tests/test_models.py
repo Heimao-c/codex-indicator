@@ -26,6 +26,22 @@ class EventStatusTests(unittest.TestCase):
     def test_compaction_session_start_is_working(self) -> None:
         self.assertEqual(status_for_event("SessionStart", {"source": "compact"}), SessionStatus.WORKING)
 
+    def test_claude_notification_permission_prompt_needs_attention(self) -> None:
+        self.assertEqual(
+            status_for_event("Notification", {"notification_type": "permission_prompt"}),
+            SessionStatus.ATTENTION,
+        )
+
+    def test_claude_notification_other_types_are_done(self) -> None:
+        for payload in (
+            {"notification_type": "idle_prompt"},
+            {"notification_type": "agent_completed"},
+            {"notification_type": "auth_success"},
+            {},
+        ):
+            with self.subTest(payload=payload):
+                self.assertEqual(status_for_event("Notification", payload), SessionStatus.DONE)
+
 
 if __name__ == "__main__":
     unittest.main()

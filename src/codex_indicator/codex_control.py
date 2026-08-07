@@ -94,7 +94,7 @@ class CodexAppServerClient:
                     "params": {
                         "clientInfo": {
                             "name": "codex_indicator",
-                            "title": "Codex Indicator",
+                            "title": "CC Indicator",
                             "version": __version__,
                         }
                     },

@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 from codex_indicator.models import SessionState, SessionStatus, status_for_event
 from codex_indicator.paths import session_state_dir
-from codex_indicator.processes import find_codex_ancestor, pid_is_alive, terminal_identity
+from codex_indicator.processes import find_agent_ancestor, pid_is_alive, terminal_identity
 
 
 SAFE_ID = re.compile(r"[^A-Za-z0-9._-]")
@@ -36,6 +36,10 @@ class StateStore:
         event = str(payload.get("hook_event_name") or "").strip()
         if not session_id or not event:
             return None
+        # Claude Code hooks carry "transcript_path" while Codex hooks do not;
+        # keep the two indistinguishable in the tray but remember the origin so
+        # Codex-only management actions are never offered for Claude sessions.
+        tool = "claude" if isinstance(payload.get("transcript_path"), str) else "codex"
         state = SessionState(
             session_id=session_id,
             status=status_for_event(event, payload),
@@ -43,9 +47,11 @@ class StateStore:
             event=event,
             updated_at=now if now is not None else time.time(),
             turn_id=str(payload["turn_id"]) if payload.get("turn_id") else None,
-            pid=pid if pid is not None else find_codex_ancestor(),
+            pid=pid if pid is not None else find_agent_ancestor(),
             terminal_id=terminal_identity(environment),
             thread_id=session_id,
+            manageable=True,
+            tool=tool,
         )
         self.write(state)
         return state
@@ -92,6 +98,46 @@ class StateStore:
             self._path(session_id).unlink()
         except FileNotFoundError:
             pass
+
+    def _overrides(self) -> dict[str, dict[str, Any]]:
+        path = self.root / "overrides.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def _save_overrides(self, value: dict[str, dict[str, Any]]) -> None:
+        path = self.root / "overrides.json"
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        temporary.write_text(
+            json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
+
+    def title_override(self, session_id: str) -> str | None:
+        entry = self._overrides().get(session_id)
+        title = entry.get("title") if isinstance(entry, dict) else None
+        return str(title) if title else None
+
+    def set_title_override(self, session_id: str, title: str | None) -> None:
+        value = self._overrides()
+        entry = value.setdefault(session_id, {})
+        if title:
+            entry["title"] = title
+        else:
+            entry.pop("title", None)
+        self._save_overrides(value)
+
+    def is_hidden(self, session_id: str) -> bool:
+        entry = self._overrides().get(session_id)
+        return bool(isinstance(entry, dict) and entry.get("hidden"))
+
+    def set_hidden(self, session_id: str, hidden: bool) -> None:
+        value = self._overrides()
+        value.setdefault(session_id, {})["hidden"] = hidden
+        self._save_overrides(value)
 
     def prune_discovered(self, active_session_ids: set[str]) -> None:
         """Drop snapshots tied to terminals that are no longer live.

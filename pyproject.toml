@@ -3,14 +3,14 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codex-indicator"
-version = "0.2.0"
-description = "Minimal system-tray manager for local and SSH Codex CLI sessions"
+name = "cc-indicator"
+version = "0.4.0"
+description = "Minimal system-tray manager for local and SSH Codex CLI and Claude Code CLI sessions"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "Heimao-c"}]
-keywords = ["codex", "openai", "system-tray", "appindicator", "developer-tools"]
+keywords = ["codex", "claude", "claude-code", "system-tray", "appindicator", "developer-tools"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: X11 Applications :: GTK",

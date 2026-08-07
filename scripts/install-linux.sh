@@ -38,12 +38,12 @@ done
 {
     printf '%s\n' '[Desktop Entry]'
     printf '%s\n' 'Type=Application'
-    printf '%s\n' 'Name=Codex Indicator'
+    printf '%s\n' 'Name=CC Indicator'
     printf 'Exec=%s\n' "$BIN_PATH"
     printf '%s\n' 'Icon=codex-indicator-symbolic'
     printf '%s\n' 'Terminal=false'
     printf '%s\n' 'Categories=Development;Utility;'
-    printf '%s\n' 'Comment=Show and manage Codex CLI session status'
+    printf '%s\n' 'Comment=Show and manage Codex and Claude CLI session status'
 } > "$APPLICATION_HOME/codex-indicator.desktop"
 
 "$BIN_PATH" --install-hooks
@@ -54,5 +54,5 @@ else
     nohup "$BIN_PATH" >/dev/null 2>&1 &
 fi
 
-printf '%s\n' "Installed Codex Indicator at $APP_ROOT"
+printf '%s\n' "Installed CC Indicator at $APP_ROOT"
 printf '%s\n' 'Open /hooks in each running Codex CLI and trust the new hooks when prompted.'

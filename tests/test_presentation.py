@@ -24,3 +24,26 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("robot-s...:robot-pro...", row)
         self.assertTrue(row.endswith("..."))
         self.assertLess(len(row), 90)
+
+    def test_row_marks_the_tool(self) -> None:
+        session = SessionView(
+            session_id="claude-1",
+            thread_id="claude-1",
+            status=SessionStatus.DONE,
+            project="robot-project",
+            title="short",
+            cwd="/workspace",
+            updated_at=1,
+            tool="claude",
+        )
+        self.assertIn("[Claude]", session_row(session))
+        codex = SessionView(
+            session_id="codex-1",
+            thread_id="codex-1",
+            status=SessionStatus.DONE,
+            project="robot-project",
+            title="short",
+            cwd="/workspace",
+            updated_at=1,
+        )
+        self.assertIn("[Codex]", session_row(codex))

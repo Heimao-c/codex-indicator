@@ -11,11 +11,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from codex_indicator.paths import codex_home
+from codex_indicator.paths import claude_home, codex_home
 
 
 HOOK_ARGUMENT = "--codex-indicator-hook"
-HOOK_STATUS_MESSAGE = "Codex Indicator: update local session status"
+HOOK_STATUS_MESSAGE = "CC Indicator: update local session status"
 EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
@@ -29,6 +29,75 @@ EVENTS = (
     "Stop",
     "SessionEnd",
 )
+# Claude Code supports the same lifecycle events, but PermissionRequest is
+# deliberately skipped: a hook that returns no decision can deny requests in
+# headless/background-subagent contexts. The context-only Notification event
+# carries the same "waiting for approval" signal safely.
+CLAUDE_EVENTS = (
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "PreCompact",
+    "PostCompact",
+    "SubagentStart",
+    "SubagentStop",
+    "Stop",
+    "SessionEnd",
+    "Notification",
+)
+CODEX_MATCHERS = {"SessionStart": "startup|resume|clear|compact"}
+CLAUDE_MATCHERS = {
+    "SessionStart": "startup|resume|clear|compact|fork",
+    "Notification": "permission_prompt|idle_prompt",
+}
+# Claude Code has no per-request approval API, but it hot-reloads settings.json
+# and honors permissions.defaultMode. "bypassPermissions" auto-approves every
+# request while the user's deny rules still take precedence; that is the
+# tray's "approve everything for Claude" lever.
+CLAUDE_BYPASS_MODE = "bypassPermissions"
+
+
+def claude_bypass_enabled(claude_dir: Path | None = None) -> bool:
+    path = (claude_dir or claude_home()) / "settings.json"
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    permissions = document.get("permissions")
+    return isinstance(permissions, dict) and permissions.get("defaultMode") == CLAUDE_BYPASS_MODE
+
+
+def set_claude_bypass(enabled: bool, claude_dir: Path | None = None) -> bool:
+    """Set or remove Claude Code's auto-approve mode; returns True when changed.
+
+    Everything else in settings.json (env, model, deny rules, hooks) is
+    preserved, and Claude Code picks up the change without a restart.
+    """
+    path = (claude_dir or claude_home()) / "settings.json"
+    if not enabled and not path.exists():
+        return False
+    document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if not isinstance(document, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    permissions = document.get("permissions")
+    if permissions is not None and not isinstance(permissions, dict):
+        raise ValueError(f"{path}: 'permissions' must be a JSON object")
+    if permissions is None:
+        permissions = {}
+        document["permissions"] = permissions
+    if enabled:
+        if permissions.get("defaultMode") == CLAUDE_BYPASS_MODE:
+            return False
+        permissions["defaultMode"] = CLAUDE_BYPASS_MODE
+    else:
+        if "defaultMode" not in permissions:
+            return False
+        del permissions["defaultMode"]
+        if not permissions:
+            del document["permissions"]
+    _atomic_write(path, document)
+    return True
 
 
 def _frozen_hook_helper() -> Path | None:
@@ -121,15 +190,19 @@ def _atomic_write(path: Path, document: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def install(home: Path | None = None, command: str | None = None) -> Path:
-    root = home or codex_home()
-    path = root / "hooks.json"
+def _install_into(
+    root: Path,
+    filename: str,
+    events: tuple[str, ...],
+    matchers: dict[str, str],
+    handler_command: str,
+) -> Path:
+    path = root / filename
     original = path.read_bytes() if path.exists() else None
     document = _load(path)
     _remove_ours(document)
-    handler_command = command or command_string()
     hooks = document["hooks"]
-    for event in EVENTS:
+    for event in events:
         group: dict[str, Any] = {
             "hooks": [
                 {
@@ -140,24 +213,40 @@ def install(home: Path | None = None, command: str | None = None) -> Path:
                 }
             ]
         }
-        if event == "SessionStart":
-            group["matcher"] = "startup|resume|clear|compact"
+        matcher = matchers.get(event)
+        if matcher:
+            group["matcher"] = matcher
         hooks.setdefault(event, []).append(group)
     rendered = (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     if original == rendered:
         return path
     if original is not None:
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        backup = path.with_name(f"hooks.json.codex-indicator-{stamp}.bak")
+        backup = path.with_name(f"{filename}.codex-indicator-{stamp}.bak")
         if backup.exists():
-            backup = path.with_name(f"hooks.json.codex-indicator-{stamp}-{os.getpid()}.bak")
+            backup = path.with_name(f"{filename}.codex-indicator-{stamp}-{os.getpid()}.bak")
         backup.write_bytes(original)
     _atomic_write(path, document)
     return path
 
 
-def uninstall(home: Path | None = None) -> Path:
-    path = (home or codex_home()) / "hooks.json"
+def install(
+    codex_dir: Path | None = None,
+    claude_dir: Path | None = None,
+    command: str | None = None,
+) -> tuple[Path, Path]:
+    handler_command = command or command_string()
+    codex_path = _install_into(
+        codex_dir or codex_home(), "hooks.json", EVENTS, CODEX_MATCHERS, handler_command
+    )
+    claude_path = _install_into(
+        claude_dir or claude_home(), "settings.json", CLAUDE_EVENTS, CLAUDE_MATCHERS, handler_command
+    )
+    return codex_path, claude_path
+
+
+def _uninstall_from(root: Path, filename: str) -> Path:
+    path = root / filename
     if not path.exists():
         return path
     document = _load(path)
@@ -168,8 +257,18 @@ def uninstall(home: Path | None = None) -> Path:
     return path
 
 
-def is_installed(home: Path | None = None) -> bool:
-    path = (home or codex_home()) / "hooks.json"
+def uninstall(
+    codex_dir: Path | None = None,
+    claude_dir: Path | None = None,
+) -> tuple[Path, Path]:
+    return (
+        _uninstall_from(codex_dir or codex_home(), "hooks.json"),
+        _uninstall_from(claude_dir or claude_home(), "settings.json"),
+    )
+
+
+def _has_all_events(root: Path, filename: str, events: tuple[str, ...]) -> bool:
+    path = root / filename
     try:
         document = _load(path)
     except (OSError, ValueError, json.JSONDecodeError):
@@ -185,4 +284,13 @@ def is_installed(home: Path | None = None) -> bool:
             if any(_is_ours(handler) for handler in group["hooks"]):
                 installed_events.add(event)
                 break
-    return set(EVENTS).issubset(installed_events)
+    return set(events).issubset(installed_events)
+
+
+def is_installed(
+    codex_dir: Path | None = None,
+    claude_dir: Path | None = None,
+) -> bool:
+    return _has_all_events(codex_dir or codex_home(), "hooks.json", EVENTS) and _has_all_events(
+        claude_dir or claude_home(), "settings.json", CLAUDE_EVENTS
+    )

@@ -74,7 +74,7 @@ def doctor() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Minimal tray status for Codex CLI sessions")
+    parser = argparse.ArgumentParser(description="CC Indicator: tray status for Codex CLI and Claude Code CLI sessions")
     parser.add_argument("--version", action="version", version=__version__)
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument(hooks.HOOK_ARGUMENT, action="store_true", dest="hook")
@@ -93,10 +93,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.hook:
         return handle_hook()
     if args.install_hooks:
-        print(hooks.install())
+        codex_path, claude_path = hooks.install()
+        print(f"Codex hooks: {codex_path}")
+        print(f"Claude hooks: {claude_path}")
         return 0
     if args.uninstall_hooks:
-        print(hooks.uninstall())
+        codex_path, claude_path = hooks.uninstall()
+        print(f"Codex hooks: {codex_path}")
+        print(f"Claude hooks: {claude_path}")
         return 0
     if args.install_autostart:
         autostart.enable()

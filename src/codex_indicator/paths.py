@@ -5,13 +5,20 @@ import sys
 from pathlib import Path
 
 
-APP_NAME = "Codex Indicator"
+# Display name; on-disk directory names below are kept stable so existing
+# hooks, autostart entries, and state survive upgrades.
+APP_NAME = "CC Indicator"
 APP_ID = "com.heimaoc.codex-indicator"
 
 
 def codex_home() -> Path:
     configured = os.environ.get("CODEX_HOME")
     return Path(configured).expanduser() if configured else Path.home() / ".codex"
+
+
+def claude_home() -> Path:
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(configured).expanduser() if configured else Path.home() / ".claude"
 
 
 def state_dir() -> Path:

@@ -43,6 +43,9 @@ def status_for_event(event: str, payload: Mapping[str, Any]) -> SessionStatus:
         "SubagentStop",
     }:
         return SessionStatus.WORKING
+    if event == "Notification":
+        note_type = str(payload.get("notification_type") or payload.get("type") or "")
+        return SessionStatus.ATTENTION if note_type == "permission_prompt" else SessionStatus.DONE
     return SessionStatus.UNKNOWN
 
 
@@ -61,6 +64,7 @@ class SessionState:
     display_title: str | None = None
     display_project: str | None = None
     manageable: bool = True
+    tool: str = "codex"
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -88,4 +92,5 @@ class SessionState:
             display_title=str(value["display_title"]) if value.get("display_title") else None,
             display_project=str(value["display_project"]) if value.get("display_project") else None,
             manageable=bool(value.get("manageable", True)),
+            tool=str(value.get("tool") or "codex"),
         )

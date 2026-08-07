@@ -7,11 +7,19 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from codex_indicator.paths import codex_home
+from codex_indicator.paths import claude_home, codex_home
 
 
 WHITESPACE = re.compile(r"\s+")
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+# Claude Code records slash-command invocations and their echoed output as user
+# text blocks carrying XML-like markup (<command-name>/model</command-name>…,
+# <local-command-stdout>…</local-command-stdout>). It is CLI machinery, not a
+# conversation title, so it is stripped before extraction.
+CLAUDE_UI_MARKUP = re.compile(
+    r"<(command-name|command-message|command-args|local-command-stdout)[^>]*>.*?</\1>",
+    re.DOTALL,
+)
 
 
 @dataclass(frozen=True)
@@ -50,8 +58,14 @@ def project_name(cwd: str) -> str:
 
 
 class MetadataResolver:
-    def __init__(self, home: Path | None = None, cache_seconds: float = 3.0) -> None:
+    def __init__(
+        self,
+        home: Path | None = None,
+        claude_dir: Path | None = None,
+        cache_seconds: float = 3.0,
+    ) -> None:
         self.home = home or codex_home()
+        self.claude_dir = claude_dir or claude_home()
         self.cache_seconds = cache_seconds
         self._cache: dict[str, tuple[float, SessionMetadata]] = {}
 
@@ -66,6 +80,8 @@ class MetadataResolver:
         title, stored_cwd = self._from_sqlite(session_id)
         if not title:
             title = self._from_index(session_id)
+        if not title:
+            title = self._from_claude_transcript(session_id)
         cwd = stored_cwd or fallback_cwd
         metadata = SessionMetadata(
             title=clean_title(title) or f"Session {session_id[:8]}",
@@ -127,3 +143,45 @@ class MetadataResolver:
             if str(value.get("id")) == session_id:
                 title = clean_title(str(value.get("thread_name") or ""))
         return title
+
+    def _from_claude_transcript(self, session_id: str) -> str:
+        # Claude Code transcripts live at <claude_home>/projects/<encoded-cwd>/<session_id>.jsonl.
+        # The first real user message serves as the conversation title, mirroring codex's
+        # first_user_message. Claude Code has no rename/archive API, so this is read-only.
+        try:
+            candidates = sorted(self.claude_dir.glob(f"projects/*/{session_id}.jsonl"))
+        except OSError:
+            return ""
+        if not candidates:
+            return ""
+        try:
+            lines = candidates[0].read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return ""
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(record, dict) or record.get("type") != "user" or record.get("isMeta"):
+                continue
+            message = record.get("message")
+            if not isinstance(message, dict):
+                continue
+            cleaned = clean_title(_message_text(message))
+            if cleaned:
+                return cleaned
+        return ""
+
+
+def _message_text(message: dict) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return CLAUDE_UI_MARKUP.sub(" ", content)
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+        return CLAUDE_UI_MARKUP.sub(" ", "\n".join(parts))
+    return ""

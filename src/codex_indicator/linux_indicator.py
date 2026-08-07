@@ -39,7 +39,7 @@ class LinuxIndicatorApp:
         )
         self.indicator.set_icon_theme_path(str(self._asset_dir))
         self.indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
-        self.indicator.set_title("Codex Indicator")
+        self.indicator.set_title("CC Indicator")
         self._rebuild_menu([])
 
     def _disabled_item(self, label: str) -> object:
@@ -96,14 +96,27 @@ class LinuxIndicatorApp:
         self._fingerprint = None
         self._refresh()
 
-    def _new_terminal(self, _item: object, session: SessionView | None = None) -> None:
-        self._run_safely(lambda: self.service.new_terminal(session), text("new_terminal"))
+    def _new_terminal(
+        self,
+        _item: object,
+        session: SessionView | None = None,
+        tool: str | None = None,
+    ) -> None:
+        target = session.tool if session else (tool or "codex")
+        self._run_safely(
+            lambda: self.service.new_terminal(session, tool=target),
+            text("new_terminal_success"),
+        )
 
     def _focus(self, _item: object, session: SessionView) -> None:
         self._run_safely(lambda: self.service.focus(session), text("focus_success"))
 
     def _approve_all(self, _item: object, sessions: list[SessionView]) -> None:
-        pending = [session for session in sessions if session.status == SessionStatus.ATTENTION]
+        pending = [
+            session
+            for session in sessions
+            if session.status == SessionStatus.ATTENTION and session.tool == "codex"
+        ]
         if not pending:
             self._message = text("approve_all_none")
             self._fingerprint = None
@@ -188,7 +201,8 @@ class LinuxIndicatorApp:
             self._run_safely(lambda: self.service.rename(session, name), text("rename_success"))
 
     def _archive(self, _item: object, session: SessionView) -> None:
-        message = text("archive_confirm").format(title=shorten(session.title, 28))
+        key = "archive_confirm_codex" if session.tool == "codex" and session.manageable else "archive_confirm"
+        message = text(key).format(title=shorten(session.title, 28))
         dialog = self.Gtk.MessageDialog(
             flags=self.Gtk.DialogFlags.MODAL,
             message_type=self.Gtk.MessageType.WARNING,
@@ -202,6 +216,36 @@ class LinuxIndicatorApp:
         dialog.destroy()
         if response == self.Gtk.ResponseType.OK:
             self._run_safely(lambda: self.service.archive(session), text("archive_success"))
+
+    def _toggle_claude_allow_all(self, item: object) -> None:
+        enabled = bool(item.get_active())
+        if enabled == self.service.claude_allow_all:
+            return
+        if enabled:
+            dialog = self.Gtk.MessageDialog(
+                flags=self.Gtk.DialogFlags.MODAL,
+                message_type=self.Gtk.MessageType.WARNING,
+                buttons=self.Gtk.ButtonsType.NONE,
+                text=text("claude_allow_all"),
+            )
+            dialog.format_secondary_text(text("claude_allow_all_confirm"))
+            dialog.add_button(text("cancel"), self.Gtk.ResponseType.CANCEL)
+            dialog.add_button(text("claude_allow_all_button"), self.Gtk.ResponseType.OK)
+            response = dialog.run()
+            dialog.destroy()
+            if response != self.Gtk.ResponseType.OK:
+                # Reverting the check re-fires toggled; the state guard above
+                # swallows that second call because nothing changed.
+                item.set_active(False)
+                return
+        try:
+            self.service.set_claude_allow_all(enabled)
+            self._message = text("claude_allow_all_on" if enabled else "claude_allow_all_off")
+        except Exception as error:
+            LOG.exception("Could not toggle Claude auto-approve")
+            self._message = str(error)
+        self._fingerprint = None
+        self._refresh()
 
     def _toggle_autostart(self, item: object) -> None:
         active = bool(item.get_active())
@@ -225,7 +269,8 @@ class LinuxIndicatorApp:
         else:
             menu.append(self._disabled_item(text("no_sessions")))
         if self.service.supports_approvals and any(
-            session.status == SessionStatus.ATTENTION for session in sessions
+            session.status == SessionStatus.ATTENTION and session.tool == "codex"
+            for session in sessions
         ):
             menu.append(self.Gtk.SeparatorMenuItem())
             approve_item = self.Gtk.MenuItem(label=text("approve_all"))
@@ -235,16 +280,29 @@ class LinuxIndicatorApp:
             menu.append(self.Gtk.SeparatorMenuItem())
             menu.append(self._disabled_item(self._message))
         menu.append(self.Gtk.SeparatorMenuItem())
-        manageable_sessions = [session for session in sessions if session.manageable]
-        if manageable_sessions:
+        if sessions:
+            # Rename/archive work for every visible conversation: real Codex
+            # threads go through the app server, while Claude sessions and
+            # placeholder terminals fall back to local display-only actions.
             manage_item = self.Gtk.MenuItem(label=text("manage"))
             manage_menu = self.Gtk.Menu()
-            for session in manageable_sessions[:30]:
+            for session in sessions[:30]:
                 manage_menu.append(self._management_item(session))
             manage_item.set_submenu(manage_menu)
             menu.append(manage_item)
+        claude_toggle = self.Gtk.CheckMenuItem(label=text("claude_allow_all"))
+        claude_toggle.set_active(self.service.claude_allow_all)
+        claude_toggle.connect("toggled", self._toggle_claude_allow_all)
+        menu.append(claude_toggle)
         new_item = self.Gtk.MenuItem(label=text("new_terminal"))
-        new_item.connect("activate", self._new_terminal)
+        new_menu = self.Gtk.Menu()
+        codex_item = self.Gtk.MenuItem(label=text("new_codex_terminal"))
+        codex_item.connect("activate", self._new_terminal, None, "codex")
+        new_menu.append(codex_item)
+        claude_item = self.Gtk.MenuItem(label=text("new_claude_terminal"))
+        claude_item.connect("activate", self._new_terminal, None, "claude")
+        new_menu.append(claude_item)
+        new_item.set_submenu(new_menu)
         menu.append(new_item)
         hook_label = text("hooks_repair") if hooks.is_installed() else text("hooks_install")
         hook_item = self.Gtk.MenuItem(label=hook_label)
@@ -277,8 +335,9 @@ class LinuxIndicatorApp:
             parts.append(f"{COLOR_SYMBOLS[SessionStatus.ATTENTION]}{attention}")
         if done:
             parts.append(f"{COLOR_SYMBOLS[SessionStatus.DONE]}{done}")
-        label = " C " + (" ".join(parts) if parts else "0")
-        self.indicator.set_label(label, " C 🟢99 🟠99 🔵99")
+        summary = " ".join(parts) if parts else "0"
+        label = " CC " + summary
+        self.indicator.set_label(label, f"CC Indicator · {summary}")
         icon = (
             "codex-indicator-attention"
             if attention
@@ -288,7 +347,7 @@ class LinuxIndicatorApp:
             if done
             else "codex-indicator-idle"
         )
-        self.indicator.set_icon_full(icon, "Codex Indicator")
+        self.indicator.set_icon_full(icon, "CC Indicator")
 
     def _refresh(self) -> bool:
         sessions = self.service.sessions()

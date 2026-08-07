@@ -17,10 +17,12 @@ LOG = logging.getLogger(__name__)
 
 
 # This probe is sent over an already-authenticated SSH host entry. It is read-only:
-# it inspects live Codex TTYs, their open rollout file, and the public thread metadata.
+# it inspects live Codex/Claude TTYs, their open rollout/transcript files, and the
+# public thread metadata.
 REMOTE_PROBE = r'''
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -173,6 +175,122 @@ def project_name(cwd):
         candidate = candidate.parent
 
 
+def infer_claude_status(path, now):
+    try:
+        modified = os.stat(path).st_mtime
+    except OSError:
+        return "done"
+    if now - modified <= 20.0:
+        return "working"
+    meaningful = "done"
+    for line in tail_lines(path):
+        try:
+            record = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(record, dict):
+            continue
+        record_type = str(record.get("type") or "")
+        if record_type == "user" and not record.get("isMeta"):
+            meaningful = "working"
+        elif record_type == "assistant":
+            message = record.get("message")
+            stop_reason = message.get("stop_reason") if isinstance(message, dict) else None
+            meaningful = "working" if stop_reason == "tool_use" else "done"
+    return meaningful
+
+
+def claude_title(path):
+    for line in tail_lines(path):
+        try:
+            record = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(record, dict) or record.get("type") != "user" or record.get("isMeta"):
+            continue
+        content = record.get("message", {}).get("content")
+        if isinstance(content, str):
+            return clean(strip_ui_markup(content))
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and isinstance(block.get("text"), str):
+                    parts.append(block["text"])
+            if parts:
+                return clean(strip_ui_markup(" ".join(parts)))
+    return ""
+
+
+def strip_ui_markup(value):
+    return re.sub(
+        r"<(command-name|command-message|command-args|local-command-stdout)[^>]*>.*?</\1>",
+        " ",
+        value,
+        flags=re.DOTALL,
+    )
+
+
+def claude_config_dir(pid_root=None):
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    if pid_root is not None:
+        try:
+            environ = (pid_root / "environ").read_bytes().split(b"\0")
+            for item in environ:
+                key, separator, value = item.partition(b"=")
+                if separator and key.decode("utf-8", "replace") == "CLAUDE_CONFIG_DIR":
+                    return Path(value.decode("utf-8", "replace"))
+        except Exception:
+            pass
+    return Path(override) if override else Path.home() / ".claude"
+
+
+def claude_transcript_for(cwd, started, now, config_dir):
+    """Newest transcript of one live Claude terminal (created after start)."""
+    encoded = cwd.replace("/", "-")
+    candidates = []
+    try:
+        paths = (config_dir / "projects" / encoded).glob("*.jsonl")
+    except OSError:
+        return None
+    for path in paths:
+        stem = path.stem
+        if len(stem) != 36 or stem.count("-") != 4:
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if stat.st_ctime + 60.0 < started:
+            continue
+        candidates.append((path, stat))
+    if not candidates:
+        return None
+    best = max(
+        candidates,
+        key=lambda item: (now - item[1].st_mtime <= 20.0, item[1].st_mtime, item[1].st_ctime),
+    )
+    return best[0]
+
+
+def codex_activity(cwd):
+    """(updated_at_ms, first_user_message) of the most recently touched thread."""
+    databases = sorted(Path.home().glob(".codex/state_*.sqlite"), reverse=True)
+    for database in databases:
+        try:
+            connection = sqlite3.connect("file:%s?mode=ro" % database, uri=True, timeout=0.2)
+            row = connection.execute(
+                "SELECT updated_at_ms, first_user_message FROM threads"
+                " WHERE cwd = ? ORDER BY updated_at_ms DESC LIMIT 1",
+                (cwd,),
+            ).fetchone()
+            connection.close()
+        except Exception:
+            continue
+        if row and row[0]:
+            return int(row[0]), clean(row[1])
+    return 0, ""
+
+
 def metadata(home, session_id, fallback_cwd):
     title = ""
     stored_cwd = ""
@@ -217,13 +335,17 @@ remote_to_local = {
     if source_port in requested_ports
 }
 home = Path.home() / ".codex"
+now = time.time()
+agent_comms = {"codex", "codex.exe", "codex-cli", "codex-cli.exe", "claude", "claude.exe"}
 by_tty = {}
+claude_config_dirs = set()
 for name in os.listdir("/proc"):
     if not name.isdigit():
         continue
     root = Path("/proc") / name
     try:
-        if (root / "comm").read_text(errors="replace").strip().lower() not in {"codex", "codex.exe", "codex-cli", "codex-cli.exe"}:
+        comm = (root / "comm").read_text(errors="replace").strip().lower()
+        if comm not in agent_comms:
             continue
         tty_path = os.readlink(root / "fd" / "0")
         if not tty_path.startswith("/dev/pts/"):
@@ -233,39 +355,163 @@ for name in os.listdir("/proc"):
             continue
         if not remote_to_local and logged_ttys and tty not in logged_ttys:
             continue
-        rollout = rollout_for(root)
         cwd = os.readlink(root / "cwd")
+        started = process_started(root)
     except OSError:
         continue
-    placeholder = rollout is None
-    if rollout:
-        updated_at, rollout_path, session_id, _is_root = rollout
-        title, project, resolved_cwd = metadata(home, session_id, cwd)
-        status = infer_status(rollout_path)
+    if comm in {"claude", "claude.exe"}:
+        config_dir = claude_config_dir(root)
+        claude_config_dirs.add(config_dir)
+        transcript = claude_transcript_for(cwd, started, now, config_dir)
+        if transcript:
+            stat = transcript.stat()
+            session_id = transcript.stem
+            title = claude_title(transcript) or ("Session " + session_id[:8])
+            item = {
+                "session_id": session_id,
+                "pid": int(name),
+                "tty": tty,
+                "cwd": cwd,
+                "rollout_path": str(transcript),
+                "status": infer_claude_status(transcript, now),
+                "updated_at": stat.st_mtime,
+                "title": title,
+                "project": project_name(cwd),
+                "local_tty": remote_to_local.get(tty, ""),
+                "manageable": True,
+                "tool": "claude",
+            }
+        else:
+            item = {
+                "session_id": "process-%s-%s" % (name, tty.replace("/", "-")),
+                "pid": int(name),
+                "tty": tty,
+                "cwd": cwd,
+                "rollout_path": "",
+                "status": "done",
+                "updated_at": started,
+                "title": "Claude terminal " + tty,
+                "project": project_name(cwd),
+                "local_tty": remote_to_local.get(tty, ""),
+                "manageable": False,
+                "tool": "claude",
+            }
     else:
-        updated_at = process_started(root)
-        rollout_path = ""
-        session_id = "process-%s-%s" % (name, tty.replace("/", "-"))
-        title = "Codex terminal " + tty
-        project = project_name(cwd)
-        resolved_cwd = cwd
-        status = "done"
-    item = {
-        "session_id": session_id,
-        "pid": int(name),
-        "tty": tty,
-        "cwd": resolved_cwd,
-        "rollout_path": str(rollout_path),
-        "status": status,
-        "updated_at": updated_at,
-        "title": title,
-        "project": project,
-        "local_tty": remote_to_local.get(tty, ""),
-        "manageable": not placeholder,
-    }
+        rollout = rollout_for(root)
+        placeholder = rollout is None
+        if rollout:
+            updated_at, rollout_path, session_id, _is_root = rollout
+            title, project, resolved_cwd = metadata(home, session_id, cwd)
+            status = infer_status(rollout_path)
+        else:
+            updated_at = started
+            rollout_path = ""
+            session_id = "process-%s-%s" % (name, tty.replace("/", "-"))
+            # Newer Codex versions keep their conversation state in the
+            # app-server database; a recently touched thread means the TUI is
+            # busy even without an exposed rollout file.
+            activity_ms, activity_title = codex_activity(cwd)
+            if now * 1000.0 - activity_ms <= 120000.0:
+                status = "working"
+            else:
+                status = "done"
+            title = activity_title or ("Codex terminal " + tty)
+            project = project_name(cwd)
+            resolved_cwd = cwd
+        item = {
+            "session_id": session_id,
+            "pid": int(name),
+            "tty": tty,
+            "cwd": resolved_cwd,
+            "rollout_path": str(rollout_path),
+            "status": status,
+            "updated_at": updated_at,
+            "title": title,
+            "project": project,
+            "local_tty": remote_to_local.get(tty, ""),
+            "manageable": not placeholder,
+            "tool": "codex",
+        }
     if tty not in by_tty or item["updated_at"] > by_tty[tty]["updated_at"]:
         by_tty[tty] = item
-print(json.dumps(list(by_tty.values()), ensure_ascii=False))
+claude_settings = str((next(iter(claude_config_dirs), None) or claude_config_dir()) / "settings.json")
+claude_info = {"settings_path": claude_settings, "exists": False, "bypass": False}
+try:
+    document = json.load(open(claude_settings, encoding="utf-8"))
+    claude_info["exists"] = True
+    claude_info["bypass"] = bool((document.get("permissions") or {}).get("defaultMode") == "bypassPermissions")
+except Exception:
+    pass
+print(json.dumps({"sessions": list(by_tty.values()), "claude": claude_info}, ensure_ascii=False))
+'''
+
+
+# Companion write script for the Claude auto-approve toggle: sets or removes
+# permissions.defaultMode=bypassPermissions in the remote Claude Code settings,
+# preserving everything else. It only ever touches that one key.
+REMOTE_CLAUDE_TOGGLE = r'''
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+
+def settings_path():
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    if override:
+        return Path(override) / "settings.json"
+    default = Path.home() / ".claude" / "settings.json"
+    try:
+        for name in os.listdir("/proc"):
+            if not name.isdigit():
+                continue
+            root = Path("/proc") / name
+            try:
+                if (root / "comm").read_text(errors="replace").strip().lower() != "claude":
+                    continue
+                environ = (root / "environ").read_bytes().split(b"\0")
+            except OSError:
+                continue
+            for item in environ:
+                key, separator, value = item.partition(b"=")
+                if separator and key.decode("utf-8", "replace") == "CLAUDE_CONFIG_DIR":
+                    return Path(value.decode("utf-8", "replace")) / "settings.json"
+    except Exception:
+        pass
+    return default
+
+
+def main():
+    enabled = sys.argv[1] == "on"
+    path = settings_path()
+    document = {}
+    if path.exists():
+        document = json.loads(path.read_text(encoding="utf-8"))
+    permissions = document.setdefault("permissions", {})
+    if enabled:
+        permissions["defaultMode"] = "bypassPermissions"
+    else:
+        permissions.pop("defaultMode", None)
+        if not permissions:
+            document.pop("permissions", None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=".settings.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(document, output, ensure_ascii=False, indent=2)
+            output.write("\n")
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+    print("ok")
+
+
+main()
 '''
 
 
@@ -288,6 +534,7 @@ class RemoteSession:
     project: str
     host: str
     manageable: bool = True
+    tool: str = "codex"
 
 
 SSH_OPTIONS_WITH_VALUE = {
@@ -342,12 +589,65 @@ def ssh_target(argv: list[str]) -> str | None:
     return None
 
 
+def set_claude_bypass(host: str, enabled: bool) -> bool:
+    """Set/remove permissions.defaultMode on a connected remote host."""
+    command = " ".join(
+        (
+            "python3 -c",
+            shlex.quote(REMOTE_CLAUDE_TOGGLE),
+            "on" if enabled else "off",
+        )
+    )
+    try:
+        result = subprocess.run(
+            [
+                "ssh", "-T", "-o", "ClearAllForwardings=yes", "-o", "BatchMode=yes",
+                "-o", "ConnectTimeout=3", "-o", "LogLevel=ERROR", host,
+                command,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        LOG.debug("Could not toggle Claude auto-approve on %s", host, exc_info=True)
+        return False
+    if result.returncode != 0:
+        LOG.debug("Claude auto-approve toggle failed on %s: %s", host, result.stderr.strip())
+        return False
+    return True
+
+
 class LinuxRemoteScanner:
     def __init__(self, proc_root: Path = Path("/proc"), cache_seconds: float = 5.0) -> None:
         self.proc_root = proc_root
         self.cache_seconds = cache_seconds
         self._cached_at = 0.0
         self._cached: list[RemoteSession] = []
+        self._claude_info: dict[str, dict] = {}
+
+    def claude_bypass_state(self) -> dict[str, bool]:
+        """Host -> whether its Claude settings already have auto-approve on."""
+        return {
+            host: bool(info.get("bypass"))
+            for host, info in self._claude_info.items()
+            if info.get("exists")
+        }
+
+    def claude_hosts(self) -> list[str]:
+        return sorted(self._claude_info)
+
+    def set_claude_allow_all(self, enabled: bool) -> int:
+        """Apply the Claude auto-approve toggle to every connected remote host."""
+        updated = 0
+        for host in self.claude_hosts():
+            if set_claude_bypass(host, enabled):
+                updated += 1
+                info = self._claude_info.get(host)
+                if info:
+                    info["bypass"] = bool(enabled)
+        return updated
 
     def connections(self) -> list[SshConnection]:
         found: dict[tuple[str, str], SshConnection] = {}
@@ -379,8 +679,7 @@ class LinuxRemoteScanner:
             found[(host, tty)] = connection
         return list(found.values())
 
-    @staticmethod
-    def _probe(host: str, connections: list[SshConnection]) -> list[RemoteSession]:
+    def _probe(self, host: str, connections: list[SshConnection]) -> list[RemoteSession]:
         port_ttys = {
             str(connection.source_port): connection.local_tty
             for connection in connections
@@ -414,11 +713,17 @@ class LinuxRemoteScanner:
         try:
             payload = json.loads(result.stdout)
         except (json.JSONDecodeError, TypeError):
-            LOG.debug("Remote Codex query returned invalid JSON from %s", host)
+            LOG.debug("Remote agent query returned invalid JSON from %s", host)
             return []
         sessions: list[RemoteSession] = []
         fallback_local_tty = connections[0].local_tty if len(connections) == 1 else "unknown"
-        for value in payload if isinstance(payload, list) else []:
+        claude_info = payload.get("claude") if isinstance(payload, dict) else None
+        if isinstance(claude_info, dict):
+            self._claude_info[host] = claude_info
+        elif host in self._claude_info:
+            del self._claude_info[host]
+        values = payload.get("sessions") if isinstance(payload, dict) else payload
+        for value in values if isinstance(values, list) else []:
             try:
                 status = SessionStatus(str(value["status"]))
                 remote_tty = str(value["tty"])
@@ -435,6 +740,7 @@ class LinuxRemoteScanner:
                         project=str(value.get("project") or "—"),
                         host=host,
                         manageable=bool(value.get("manageable", True)),
+                        tool=str(value.get("tool") or "codex"),
                     )
                 )
             except (KeyError, TypeError, ValueError):

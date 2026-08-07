@@ -13,7 +13,7 @@ def run() -> int:
     configure_logging()
     lock = InstanceLock()
     if not lock.acquire():
-        LOG.info("Another Codex Indicator instance is already running")
+        LOG.info("Another CC Indicator instance is already running")
         return 0
     try:
         if sys.platform.startswith("linux"):
@@ -27,7 +27,7 @@ def run() -> int:
 
         return PortableTrayApp().run()
     except Exception:
-        LOG.exception("Codex Indicator terminated unexpectedly")
+        LOG.exception("CC Indicator terminated unexpectedly")
         return 1
     finally:
         lock.release()

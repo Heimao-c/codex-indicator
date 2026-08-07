@@ -19,4 +19,4 @@ for icon in symbolic attention working done idle; do
 done
 rm -rf "$DATA_HOME/codex-indicator"
 
-printf '%s\n' 'Codex Indicator was removed. Session-status cache was kept in the platform state directory.'
+printf '%s\n' 'CC Indicator was removed. Session-status cache was kept in the platform state directory.'

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from codex_indicator.i18n import COLOR_SYMBOLS, status_text
+from codex_indicator.i18n import COLOR_SYMBOLS, status_text, text
 from codex_indicator.service import SessionView
 
 
@@ -17,8 +17,12 @@ def session_location(session: SessionView) -> str:
     return shorten(session.project, 16)
 
 
+def tool_label(tool: str) -> str:
+    return text("tool_claude") if tool == "claude" else text("tool_codex")
+
+
 def session_row(session: SessionView) -> str:
     return (
         f"{COLOR_SYMBOLS[session.status]} {status_text(session.status)} · "
-        f"{session_location(session)} — {shorten(session.title, 12)}"
+        f"[{tool_label(session.tool)}] {session_location(session)} — {shorten(session.title, 12)}"
     )

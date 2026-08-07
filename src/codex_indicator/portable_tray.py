@@ -25,9 +25,9 @@ class PortableTrayApp:
         self.Image = Image
         self.ImageDraw = ImageDraw
         self.service = service or SessionService()
-        self.icon = pystray.Icon("codex-indicator")
+        self.icon = pystray.Icon("cc-indicator")
         self.icon.icon = self._image("neutral")
-        self.icon.title = "Codex Indicator"
+        self.icon.title = "CC Indicator"
         self.icon.menu = self._menu([])
         self._stop = threading.Event()
         self._fingerprint: tuple[tuple[object, ...], ...] | None = None
@@ -84,7 +84,8 @@ class PortableTrayApp:
         else:
             rows.append(Item(text("no_sessions"), noop, enabled=False))
         if self.service.supports_approvals and any(
-            session.status == SessionStatus.ATTENTION for session in sessions
+            session.status == SessionStatus.ATTENTION and session.tool == "codex"
+            for session in sessions
         ):
             rows.extend(
                 [
@@ -96,11 +97,22 @@ class PortableTrayApp:
             [
                 Menu.SEPARATOR,
                 *(
-                    [self._management_menu([session for session in sessions if session.manageable])]
-                    if any(session.manageable for session in sessions)
+                    [self._management_menu(sessions[:30])]
+                    if sessions
                     else []
                 ),
-                Item(text("new_terminal"), lambda *_args: self._new_terminal()),
+                Item(
+                    text("claude_allow_all"),
+                    self._toggle_claude_allow_all,
+                    checked=lambda _item: self.service.claude_allow_all,
+                ),
+                Item(
+                    text("new_terminal"),
+                    Menu(
+                        Item(text("new_codex_terminal"), lambda *_args: self._new_terminal(tool="codex")),
+                        Item(text("new_claude_terminal"), lambda *_args: self._new_terminal(tool="claude")),
+                    ),
+                ),
                 Item(text("hooks_repair") if hooks.is_installed() else text("hooks_install"), self._install_hooks),
                 Item(text("autostart"), self._toggle_autostart, checked=lambda _item: autostart.is_enabled()),
                 Item(text("refresh"), self._refresh_clicked),
@@ -144,12 +156,13 @@ class PortableTrayApp:
 
     def _archive(self, session: SessionView) -> None:
         tkinter, messagebox, _simpledialog = self._dialog_modules()
+        key = "archive_confirm_codex" if session.tool == "codex" and session.manageable else "archive_confirm"
         root = tkinter.Tk()
         root.withdraw()
         try:
             confirmed = messagebox.askyesno(
                 text("archive_title"),
-                text("archive_confirm").format(title=shorten(session.title, 28)),
+                text(key).format(title=shorten(session.title, 28)),
                 parent=root,
             )
         finally:
@@ -163,7 +176,11 @@ class PortableTrayApp:
         self._refresh(force=True)
 
     def _approve_all(self, sessions: list[SessionView]) -> None:
-        pending = [session for session in sessions if session.status == SessionStatus.ATTENTION]
+        pending = [
+            session
+            for session in sessions
+            if session.status == SessionStatus.ATTENTION and session.tool == "codex"
+        ]
         if not pending:
             return
         tkinter, messagebox, _simpledialog = self._dialog_modules()
@@ -216,17 +233,43 @@ class PortableTrayApp:
             root.destroy()
         self._refresh(force=True)
 
-    def _new_terminal(self, session: SessionView | None = None) -> None:
+    def _new_terminal(self, session: SessionView | None = None, tool: str | None = None) -> None:
         try:
-            self.service.new_terminal(session)
+            self.service.new_terminal(session, tool=(session.tool if session else (tool or "codex")))
         except Exception:
-            LOG.exception("Could not open Codex terminal")
+            LOG.exception("Could not open terminal")
 
     def _install_hooks(self, _icon: Any, _item: Any) -> None:
         try:
             hooks.install()
         except Exception:
             LOG.exception("Could not install hooks")
+        self._refresh(force=True)
+
+    def _toggle_claude_allow_all(self, _icon: Any, _item: Any) -> None:
+        if self.service.claude_allow_all:
+            try:
+                self.service.set_claude_allow_all(False)
+            except Exception:
+                LOG.exception("Could not disable Claude auto-approve")
+            self._refresh(force=True)
+            return
+        tkinter, messagebox, _simpledialog = self._dialog_modules()
+        root = tkinter.Tk()
+        root.withdraw()
+        try:
+            confirmed = messagebox.askyesno(
+                text("claude_allow_all"),
+                text("claude_allow_all_confirm"),
+                parent=root,
+            )
+        finally:
+            root.destroy()
+        if confirmed:
+            try:
+                self.service.set_claude_allow_all(True)
+            except Exception:
+                LOG.exception("Could not enable Claude auto-approve")
         self._refresh(force=True)
 
     def _toggle_autostart(self, _icon: Any, _item: Any) -> None:
@@ -258,7 +301,7 @@ class PortableTrayApp:
             if counts[SessionStatus.DONE]
             else "neutral"
         )
-        summary = f"Codex: {counts[SessionStatus.WORKING]} working, {counts[SessionStatus.ATTENTION]} attention"
+        summary = f"CC: {counts[SessionStatus.WORKING]} working, {counts[SessionStatus.ATTENTION]} attention"
         self.icon.icon = self._image(state)
         self.icon.title = summary
         self.icon.menu = self._menu(sessions)

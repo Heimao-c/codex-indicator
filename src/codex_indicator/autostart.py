@@ -75,7 +75,7 @@ def enable(arguments: list[str] | None = None) -> None:
         content = "\n".join(
             (
                 "[Unit]",
-                "Description=Minimal tray status for Codex CLI sessions",
+                "Description=CC Indicator: tray status for Codex and Claude CLI sessions",
                 "After=graphical-session.target",
                 "PartOf=graphical-session.target",
                 "",
@@ -107,12 +107,12 @@ def enable(arguments: list[str] | None = None) -> None:
         (
             "[Desktop Entry]",
             "Type=Application",
-            "Name=Codex Indicator",
+            "Name=CC Indicator",
             f"Exec={command}",
             "Icon=codex-indicator-symbolic",
             "Terminal=false",
             "X-GNOME-Autostart-enabled=true",
-            "Comment=Show and manage Codex CLI session status",
+            "Comment=Show and manage Codex and Claude CLI session status",
             "",
         )
     )

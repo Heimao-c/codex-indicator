@@ -44,7 +44,41 @@ class StateStoreTests(unittest.TestCase):
             self.assertIsNotNone(state)
             self.assertEqual(state.status, SessionStatus.WORKING)
             self.assertEqual(state.terminal_id, "GNOME_TERMINAL_SCREEN:/screen/1")
+            self.assertEqual(state.tool, "codex")
+            self.assertTrue(state.manageable)
             self.assertEqual(store.list_states(now=101.0)[0].session_id, "abc")
+
+    def test_claude_hook_records_are_manageable_and_tool_claude(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = StateStore(Path(temp))
+            state = store.record_hook(
+                {
+                    "session_id": "claude-1",
+                    "hook_event_name": "UserPromptSubmit",
+                    "cwd": "/workspace",
+                    "transcript_path": "/home/user/.claude/projects/-home-phi-codex-indicator/claude-1.jsonl",
+                },
+                pid=os.getpid(),
+                now=100.0,
+            )
+            self.assertIsNotNone(state)
+            self.assertEqual(state.tool, "claude")
+            self.assertTrue(state.manageable)
+            self.assertEqual(state.status, SessionStatus.WORKING)
+            self.assertEqual(store.list_states()[0].tool, "claude")
+
+    def test_title_override_and_hidden_survive_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = StateStore(root)
+            store.set_title_override("session-1", "My title")
+            store.set_hidden("session-2", True)
+            reloaded = StateStore(root)
+            self.assertEqual(reloaded.title_override("session-1"), "My title")
+            self.assertTrue(reloaded.is_hidden("session-2"))
+            self.assertIsNone(reloaded.title_override("session-2"))
+            reloaded.set_title_override("session-1", None)
+            self.assertIsNone(StateStore(root).title_override("session-1"))
 
     def test_closed_session_is_hidden(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

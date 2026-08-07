@@ -77,7 +77,7 @@ class InstanceLock:
 
     def __enter__(self) -> "InstanceLock":
         if not self.acquire():
-            raise RuntimeError("Codex Indicator is already running")
+            raise RuntimeError("CC Indicator is already running")
         return self
 
     def __exit__(self, *_args: object) -> None:

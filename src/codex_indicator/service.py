@@ -3,12 +3,13 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, replace
 
+from codex_indicator import hooks
 from codex_indicator.codex_control import CodexAppServerClient
 from codex_indicator.metadata import MetadataResolver
 from codex_indicator.models import STATUS_ORDER, SessionStatus
 from codex_indicator.scanner import PassiveScanner
 from codex_indicator.state_store import StateStore
-from codex_indicator.terminal import launch_codex
+from codex_indicator.terminal import launch_claude, launch_codex
 from codex_indicator.terminal_window import (
     ApprovalBatchResult,
     TerminalApprovalController,
@@ -32,6 +33,7 @@ class SessionView:
     window_id: int | None = None
     window_title: str | None = None
     manageable: bool = True
+    tool: str = "codex"
 
     @property
     def location(self) -> str:
@@ -52,7 +54,6 @@ class SessionService:
         self.scanner = scanner or PassiveScanner()
         self.windows = windows or TerminalWindowResolver()
         self.approvals = approvals or TerminalApprovalController()
-        self._title_overrides: dict[str, str] = {}
 
     def sessions(self) -> list[SessionView]:
         self.scanner.reconcile(self.store)
@@ -64,6 +65,8 @@ class SessionService:
             if not previous or state.updated_at > previous.updated_at:
                 by_terminal[key] = state
         for state in by_terminal.values():
+            if self.store.is_hidden(state.session_id):
+                continue
             thread_id = state.thread_id or state.session_id
             item = None if state.source_host else self.metadata.resolve(thread_id, state.cwd)
             views.append(
@@ -73,7 +76,7 @@ class SessionService:
                     status=state.status,
                     project=state.display_project or (item.project if item else "—"),
                     title=(
-                        self._title_overrides.get(state.session_id)
+                        self.store.title_override(state.session_id)
                         or state.display_title
                         or (item.title if item else f"Session {thread_id[:8]}")
                     ),
@@ -83,6 +86,7 @@ class SessionService:
                     terminal_id=state.terminal_id,
                     pid=state.pid,
                     manageable=state.manageable,
+                    tool=state.tool,
                 )
             )
         views.sort(key=lambda item: (STATUS_ORDER[item.status], -item.updated_at, item.project.lower()))
@@ -124,24 +128,32 @@ class SessionService:
                 item.source_host,
                 item.window_id,
                 item.manageable,
+                item.tool,
                 int(item.updated_at),
             )
             for item in sessions
         )
 
     def rename(self, session: SessionView, name: str) -> None:
-        if not session.manageable:
-            raise RuntimeError("该终端尚未暴露可管理的 Codex 对话 ID")
-        CodexAppServerClient(session.source_host).rename(session.thread_id, name)
-        self.metadata.invalidate(session.thread_id)
-        self._title_overrides[session.session_id] = " ".join(name.split()).strip()
+        cleaned = " ".join(name.split()).strip()
+        # The indicator keeps a local display title for every conversation;
+        # Codex also renames the real conversation through its app-server API
+        # when a real thread ID is known. Placeholder terminals (no exposed
+        # rollout/conversation) and Claude sessions are local-only.
+        self.store.set_title_override(session.session_id, cleaned)
+        if session.tool == "codex" and session.manageable:
+            CodexAppServerClient(session.source_host).rename(session.thread_id, cleaned)
+            self.metadata.invalidate(session.thread_id)
 
     def archive(self, session: SessionView) -> None:
-        if not session.manageable:
-            raise RuntimeError("该终端尚未暴露可管理的 Codex 对话 ID")
+        if session.tool != "codex" or not session.manageable:
+            # Claude Code has no archive API, and placeholder terminals expose
+            # no real conversation ID: hide the conversation locally.
+            self.store.set_hidden(session.session_id, True)
+            return
         CodexAppServerClient(session.source_host).archive(session.thread_id)
         self.store.delete(session.session_id)
-        self._title_overrides.pop(session.session_id, None)
+        self.store.set_title_override(session.session_id, None)
 
     def focus(self, session: SessionView) -> None:
         current = session
@@ -156,19 +168,44 @@ class SessionService:
     def supports_approvals(self) -> bool:
         return self.approvals.supported
 
+    @property
+    def claude_allow_all(self) -> bool:
+        # On: local settings carry defaultMode=bypassPermissions and every
+        # connected remote host with Claude settings is in the same state.
+        remote = self.scanner.remote_claude_bypass_state()
+        return hooks.claude_bypass_enabled() and all(remote.values())
+
+    def set_claude_allow_all(self, enabled: bool) -> bool:
+        changed = hooks.set_claude_bypass(enabled)
+        if self.scanner.set_remote_claude_allow_all(enabled):
+            changed = True
+        return changed
+
     def approve_all(
         self,
         sessions: list[SessionView] | None = None,
         *,
         allow_high_risk: bool = False,
     ) -> ApprovalBatchResult:
+        # The terminal-screen approval flow understands Codex panes; Claude
+        # has no per-request approval API and is covered by the settings-based
+        # claude_allow_all toggle instead.
+        codex_sessions = [
+            session
+            for session in (sessions if sessions is not None else self.sessions())
+            if session.tool == "codex"
+        ]
         return self.approvals.approve_all(
-            sessions if sessions is not None else self.sessions(),
+            codex_sessions,
             allow_high_risk=allow_high_risk,
         )
 
     @staticmethod
-    def new_terminal(session: SessionView | None = None) -> None:
+    def new_terminal(session: SessionView | None = None, tool: str = "codex") -> None:
+        target = session.tool if session else tool
+        if target == "claude":
+            launch_claude(cwd=session.cwd if session else None)
+            return
         launch_codex(
             cwd=session.cwd if session else None,
             host=session.source_host if session else None,

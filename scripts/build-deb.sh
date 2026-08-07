@@ -44,7 +44,7 @@ chmod 0755 "$PACKAGE_ROOT/usr/bin/codex-indicator"
 {
     printf '%s\n' '[Desktop Entry]'
     printf '%s\n' 'Type=Application'
-    printf '%s\n' 'Name=Codex Indicator'
+    printf '%s\n' 'Name=CC Indicator'
     printf '%s\n' 'Exec=codex-indicator'
     printf '%s\n' 'Icon=codex-indicator-symbolic'
     printf '%s\n' 'Terminal=false'
