@@ -25,13 +25,13 @@
 
 ## 安装
 
-从 [Releases](https://github.com/Heimao-c/codex-indicator/releases) 下载对应平台的发布包。
+从 [Releases](https://github.com/Heimao-c/cc-indicator/releases) 下载对应平台的发布包。
 
 Ubuntu 也可以进行用户级安装：
 
 ```bash
-git clone https://github.com/Heimao-c/codex-indicator.git
-cd codex-indicator
+git clone https://github.com/Heimao-c/cc-indicator.git
+cd cc-indicator
 sh scripts/install-linux.sh
 ```
 

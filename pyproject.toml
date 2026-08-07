@@ -40,9 +40,9 @@ build = [
 codex-indicator = "codex_indicator.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Heimao-c/codex-indicator"
-Issues = "https://github.com/Heimao-c/codex-indicator/issues"
-Source = "https://github.com/Heimao-c/codex-indicator"
+Homepage = "https://github.com/Heimao-c/cc-indicator"
+Issues = "https://github.com/Heimao-c/cc-indicator/issues"
+Source = "https://github.com/Heimao-c/cc-indicator"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -30,7 +30,7 @@ find "$PACKAGE_ROOT/usr/lib/cc-indicator" -type d -name '__pycache__' -empty -de
     printf '%s\n' 'Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1, gir1.2-atspi-2.0, libayatana-appindicator3-1, libx11-6, libxtst6, x11-utils'
     printf '%s\n' 'Section: devel'
     printf '%s\n' 'Priority: optional'
-    printf '%s\n' 'Homepage: https://github.com/Heimao-c/codex-indicator'
+    printf '%s\n' 'Homepage: https://github.com/Heimao-c/cc-indicator'
     printf '%s\n' 'Description: System-tray manager for local and SSH Codex CLI and Claude Code CLI sessions'
     printf '%s\n' ' Shows state, project, and conversation title without storing prompts or replies.'
 } > "$PACKAGE_ROOT/DEBIAN/control"

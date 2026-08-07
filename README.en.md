@@ -25,13 +25,13 @@ It does not mirror full transcripts, create worktrees, require tmux/Docker/Elect
 
 ## Install
 
-Download a platform package from [Releases](https://github.com/Heimao-c/codex-indicator/releases).
+Download a platform package from [Releases](https://github.com/Heimao-c/cc-indicator/releases).
 
 For a user-level Ubuntu install from source:
 
 ```bash
-git clone https://github.com/Heimao-c/codex-indicator.git
-cd codex-indicator
+git clone https://github.com/Heimao-c/cc-indicator.git
+cd cc-indicator
 sh scripts/install-linux.sh
 ```
 
