@@ -6,11 +6,11 @@ import logging
 import logging.handlers
 import sys
 
-from codex_indicator import __version__, autostart, hooks
-from codex_indicator.app import run as run_app
-from codex_indicator.paths import hook_log_path
-from codex_indicator.service import SessionService
-from codex_indicator.state_store import StateStore
+from cc_indicator import __version__, autostart, hooks
+from cc_indicator.app import run as run_app
+from cc_indicator.paths import hook_log_path
+from cc_indicator.service import SessionService
+from cc_indicator.state_store import StateStore
 
 
 def _hook_logging() -> None:

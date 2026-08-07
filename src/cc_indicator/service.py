@@ -3,14 +3,14 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, replace
 
-from codex_indicator import hooks
-from codex_indicator.codex_control import CodexAppServerClient
-from codex_indicator.metadata import MetadataResolver
-from codex_indicator.models import STATUS_ORDER, SessionStatus
-from codex_indicator.scanner import PassiveScanner
-from codex_indicator.state_store import StateStore
-from codex_indicator.terminal import launch_claude, launch_codex
-from codex_indicator.terminal_window import (
+from cc_indicator import hooks
+from cc_indicator.codex_control import CodexAppServerClient
+from cc_indicator.metadata import MetadataResolver
+from cc_indicator.models import STATUS_ORDER, SessionStatus
+from cc_indicator.scanner import PassiveScanner
+from cc_indicator.state_store import StateStore
+from cc_indicator.terminal import launch_claude, launch_codex
+from cc_indicator.terminal_window import (
     ApprovalBatchResult,
     TerminalApprovalController,
     TerminalWindowResolver,

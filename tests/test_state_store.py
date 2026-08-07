@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codex_indicator.models import SessionState, SessionStatus
-from codex_indicator.state_store import StateStore
+from cc_indicator.models import SessionState, SessionStatus
+from cc_indicator.state_store import StateStore
 
 
 class StateStoreTests(unittest.TestCase):
@@ -56,7 +56,7 @@ class StateStoreTests(unittest.TestCase):
                     "session_id": "claude-1",
                     "hook_event_name": "UserPromptSubmit",
                     "cwd": "/workspace",
-                    "transcript_path": "/home/user/.claude/projects/-home-phi-codex-indicator/claude-1.jsonl",
+                    "transcript_path": "/home/user/.claude/projects/-home-phi-cc-indicator/claude-1.jsonl",
                 },
                 pid=os.getpid(),
                 now=100.0,

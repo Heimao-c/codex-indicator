@@ -4,7 +4,7 @@
 
 A small system-tray monitor for seeing multiple Codex CLI and Claude Code CLI terminals at a glance.
 
-![CC Indicator running](docs/codex-indicator-menu.png)
+![CC Indicator running](docs/cc-indicator-menu.png)
 
 ## What you see
 
@@ -57,7 +57,7 @@ Legacy `idle` cache entries are migrated to `done` automatically.
 
 ## Privacy and permissions
 
-Codex Indicator has no service of its own and does not upload source files, prompts, responses, API keys, or Codex credentials. Its cache contains only session IDs, state, directories, timestamps, process/terminal identifiers, and the minimum title/project metadata needed for the menu.
+CC Indicator has no service of its own and does not upload source files, prompts, responses, API keys, or Codex credentials. Its cache contains only session IDs, state, directories, timestamps, process/terminal identifiers, and the minimum title/project metadata needed for the menu.
 
 On Ubuntu, bulk approval reads the visible terminal screen only to verify a Codex approval pane and sends one confirmation key. Ordinary approvals are handled directly; destructive operations such as wiping disks or recursive system-directory deletion still require a separate confirmation. Screens are not saved.
 
@@ -66,10 +66,10 @@ SSH discovery uses existing local SSH processes and read-only probes; it does no
 ## CLI and development
 
 ```bash
-codex-indicator --install-hooks
-codex-indicator --install-autostart
-codex-indicator --dump-status
-codex-indicator --doctor
+cc-indicator --install-hooks
+cc-indicator --install-autostart
+cc-indicator --dump-status
+cc-indicator --doctor
 ```
 
 Run tests with:

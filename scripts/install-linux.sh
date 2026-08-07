@@ -5,10 +5,10 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 DATA_HOME=${XDG_DATA_HOME:-"$HOME/.local/share"}
 BIN_HOME=${HOME}/.local/bin
-APP_ROOT=${DATA_HOME}/codex-indicator/app
+APP_ROOT=${DATA_HOME}/cc-indicator/app
 ICON_HOME=${DATA_HOME}/icons/hicolor/scalable/apps
 APPLICATION_HOME=${DATA_HOME}/applications
-BIN_PATH=${BIN_HOME}/codex-indicator
+BIN_PATH=${BIN_HOME}/cc-indicator
 
 if ! /usr/bin/python3 -c 'import gi; gi.require_version("Gtk", "3.0"); gi.require_version("AyatanaAppIndicator3", "0.1"); gi.require_version("Atspi", "2.0")' 2>/dev/null \
     || ! command -v xwininfo >/dev/null 2>&1 \
@@ -20,18 +20,18 @@ if ! /usr/bin/python3 -c 'import gi; gi.require_version("Gtk", "3.0"); gi.requir
 fi
 
 install -d "$APP_ROOT" "$BIN_HOME" "$ICON_HOME" "$APPLICATION_HOME"
-cp -R "$PROJECT_ROOT/src/codex_indicator" "$APP_ROOT/"
-find "$APP_ROOT/codex_indicator" -type f -name '*.pyc' -delete
-find "$APP_ROOT/codex_indicator" -type d -name '__pycache__' -empty -delete
+cp -R "$PROJECT_ROOT/src/cc_indicator" "$APP_ROOT/"
+find "$APP_ROOT/cc_indicator" -type f -name '*.pyc' -delete
+find "$APP_ROOT/cc_indicator" -type d -name '__pycache__' -empty -delete
 
 {
     printf '%s\n' '#!/bin/sh'
-    printf '%s\n' 'APP_ROOT=${XDG_DATA_HOME:-"$HOME/.local/share"}/codex-indicator/app'
-    printf '%s\n' 'CODEX_INDICATOR_LAUNCHER="$HOME/.local/bin/codex-indicator" PYTHONPATH="$APP_ROOT${PYTHONPATH:+:$PYTHONPATH}" exec /usr/bin/python3 -m codex_indicator "$@"'
+    printf '%s\n' 'APP_ROOT=${XDG_DATA_HOME:-"$HOME/.local/share"}/cc-indicator/app'
+    printf '%s\n' 'CC_INDICATOR_LAUNCHER="$HOME/.local/bin/cc-indicator" PYTHONPATH="$APP_ROOT${PYTHONPATH:+:$PYTHONPATH}" exec /usr/bin/python3 -m cc_indicator "$@"'
 } > "$BIN_PATH"
 chmod 0755 "$BIN_PATH"
 
-for icon in "$PROJECT_ROOT"/src/codex_indicator/assets/*.svg; do
+for icon in "$PROJECT_ROOT"/src/cc_indicator/assets/*.svg; do
     install -m 0644 "$icon" "$ICON_HOME/$(basename "$icon")"
 done
 
@@ -40,16 +40,16 @@ done
     printf '%s\n' 'Type=Application'
     printf '%s\n' 'Name=CC Indicator'
     printf 'Exec=%s\n' "$BIN_PATH"
-    printf '%s\n' 'Icon=codex-indicator-symbolic'
+    printf '%s\n' 'Icon=cc-indicator-symbolic'
     printf '%s\n' 'Terminal=false'
     printf '%s\n' 'Categories=Development;Utility;'
     printf '%s\n' 'Comment=Show and manage Codex and Claude CLI session status'
-} > "$APPLICATION_HOME/codex-indicator.desktop"
+} > "$APPLICATION_HOME/cc-indicator.desktop"
 
 "$BIN_PATH" --install-hooks
 "$BIN_PATH" --install-autostart
-if [ -f "$HOME/.config/systemd/user/codex-indicator.service" ]; then
-    systemctl --user restart codex-indicator.service
+if [ -f "$HOME/.config/systemd/user/cc-indicator.service" ]; then
+    systemctl --user restart cc-indicator.service
 else
     nohup "$BIN_PATH" >/dev/null 2>&1 &
 fi

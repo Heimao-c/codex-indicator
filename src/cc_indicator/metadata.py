@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from codex_indicator.paths import claude_home, codex_home
+from cc_indicator.paths import claude_home, codex_home
 
 
 WHITESPACE = re.compile(r"\s+")

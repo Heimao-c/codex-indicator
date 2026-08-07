@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codex_indicator.remote import REMOTE_CLAUDE_TOGGLE, _socket_source_port, ssh_target
+from cc_indicator.remote import REMOTE_CLAUDE_TOGGLE, _socket_source_port, ssh_target
 
 
 class RemoteScannerTests(unittest.TestCase):

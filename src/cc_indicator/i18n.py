@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import locale
 
-from codex_indicator.models import SessionStatus
+from cc_indicator.models import SessionStatus
 
 
 def is_chinese() -> bool:

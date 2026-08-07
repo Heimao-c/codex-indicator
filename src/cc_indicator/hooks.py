@@ -11,10 +11,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from codex_indicator.paths import claude_home, codex_home
+from cc_indicator.paths import claude_home, codex_home
 
 
-HOOK_ARGUMENT = "--codex-indicator-hook"
+HOOK_ARGUMENT = "--cc-indicator-hook"
 HOOK_STATUS_MESSAGE = "CC Indicator: update local session status"
 EVENTS = (
     "SessionStart",
@@ -103,7 +103,7 @@ def set_claude_bypass(enabled: bool, claude_dir: Path | None = None) -> bool:
 def _frozen_hook_helper() -> Path | None:
     executable = Path(sys.executable).resolve()
     suffix = ".exe" if sys.platform == "win32" else ""
-    helper_names = [f"CCIndicatorHook{suffix}", f"CodexIndicatorHook{suffix}"]
+    helper_names = [f"CCIndicatorHook{suffix}", f"CCIndicatorHook{suffix}"]
     candidates = [executable.with_name(name) for name in helper_names]
     for ancestor in list(executable.parents)[:5]:
         for name in helper_names:
@@ -114,13 +114,13 @@ def _frozen_hook_helper() -> Path | None:
 def application_argv() -> list[str]:
     if getattr(sys, "frozen", False):
         return [str(Path(sys.executable).resolve())]
-    configured = os.environ.get("CODEX_INDICATOR_LAUNCHER")
+    configured = os.environ.get("CC_INDICATOR_LAUNCHER")
     if configured and Path(configured).expanduser().is_file():
         return [str(Path(configured).expanduser().resolve())]
-    found = shutil.which("codex-indicator")
+    found = shutil.which("cc-indicator")
     if found:
         return [str(Path(found).resolve())]
-    return [sys.executable, "-m", "codex_indicator"]
+    return [sys.executable, "-m", "cc_indicator"]
 
 
 def hook_argv() -> list[str]:
@@ -223,9 +223,9 @@ def _install_into(
         return path
     if original is not None:
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        backup = path.with_name(f"{filename}.codex-indicator-{stamp}.bak")
+        backup = path.with_name(f"{filename}.cc-indicator-{stamp}.bak")
         if backup.exists():
-            backup = path.with_name(f"{filename}.codex-indicator-{stamp}-{os.getpid()}.bak")
+            backup = path.with_name(f"{filename}.cc-indicator-{stamp}-{os.getpid()}.bak")
         backup.write_bytes(original)
     _atomic_write(path, document)
     return path

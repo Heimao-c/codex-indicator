@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from codex_indicator.i18n import COLOR_SYMBOLS, status_text, text
-from codex_indicator.service import SessionView
+from cc_indicator.i18n import COLOR_SYMBOLS, status_text, text
+from cc_indicator.service import SessionView
 
 
 def shorten(value: str, limit: int) -> str:

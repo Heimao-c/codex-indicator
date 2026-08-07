@@ -1,6 +1,6 @@
 import unittest
 
-from codex_indicator.models import SessionStatus, status_for_event
+from cc_indicator.models import SessionStatus, status_for_event
 
 
 class EventStatusTests(unittest.TestCase):

@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from codex_indicator.models import SessionStatus
+from cc_indicator.models import SessionStatus
 
 
 LOG = logging.getLogger(__name__)

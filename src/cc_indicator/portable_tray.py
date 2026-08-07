@@ -4,11 +4,11 @@ import logging
 import threading
 from typing import Any
 
-from codex_indicator import __version__, autostart, hooks
-from codex_indicator.i18n import text
-from codex_indicator.models import SessionStatus
-from codex_indicator.presentation import session_row, shorten
-from codex_indicator.service import SessionService, SessionView
+from cc_indicator import __version__, autostart, hooks
+from cc_indicator.i18n import text
+from cc_indicator.models import SessionStatus
+from cc_indicator.presentation import session_row, shorten
+from cc_indicator.service import SessionService, SessionView
 
 
 LOG = logging.getLogger(__name__)

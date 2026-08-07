@@ -2,7 +2,7 @@
 
 ## Data boundary
 
-Codex Indicator is local-only. It does not provide a network listener and does not upload Codex data.
+CC Indicator is local-only. It does not provide a network listener and does not upload Codex data.
 
 The hook receives Codex lifecycle JSON on standard input. Only the session ID, status, working directory, event name, timestamps, and optional local process/terminal identifiers are persisted. Full prompts, model replies, tool inputs, tool outputs, credentials, and source files are not persisted by this project.
 

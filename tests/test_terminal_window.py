@@ -2,9 +2,9 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from codex_indicator.models import SessionStatus
-from codex_indicator.service import SessionView
-from codex_indicator.terminal_window import (
+from cc_indicator.models import SessionStatus
+from cc_indicator.service import SessionView
+from cc_indicator.terminal_window import (
     TerminalApprovalController,
     TerminalWindow,
     TerminalWindowResolver,
@@ -40,8 +40,8 @@ class TerminalWindowTests(unittest.TestCase):
             subprocess.CompletedProcess([], 0, stdout="ttys004\n", stderr=""),
             subprocess.CompletedProcess([], 0, stdout="focused\n", stderr=""),
         ]
-        with patch("codex_indicator.terminal_window.sys.platform", "darwin"), patch(
-            "codex_indicator.terminal_window.subprocess.run", side_effect=responses
+        with patch("cc_indicator.terminal_window.sys.platform", "darwin"), patch(
+            "cc_indicator.terminal_window.subprocess.run", side_effect=responses
         ) as run:
             focus_macos_terminal(123)
         self.assertEqual(run.call_args_list[1].args[0][-1], "/dev/ttys004")

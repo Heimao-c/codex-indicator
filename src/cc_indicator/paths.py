@@ -8,7 +8,7 @@ from pathlib import Path
 # Display name; on-disk directory names below are kept stable so existing
 # hooks, autostart entries, and state survive upgrades.
 APP_NAME = "CC Indicator"
-APP_ID = "com.heimaoc.codex-indicator"
+APP_ID = "com.heimaoc.cc-indicator"
 
 
 def codex_home() -> Path:
@@ -22,16 +22,16 @@ def claude_home() -> Path:
 
 
 def state_dir() -> Path:
-    configured = os.environ.get("CODEX_INDICATOR_STATE_DIR")
+    configured = os.environ.get("CC_INDICATOR_STATE_DIR")
     if configured:
         return Path(configured).expanduser()
     if sys.platform == "win32":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-        return base / "Codex Indicator"
+        return base / "CC Indicator"
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Codex Indicator"
+        return Path.home() / "Library" / "Application Support" / "CC Indicator"
     base = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
-    return base / "codex-indicator"
+    return base / "cc-indicator"
 
 
 def session_state_dir() -> Path:
@@ -60,12 +60,12 @@ def lock_path() -> Path:
 
 def linux_autostart_path() -> Path:
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "autostart" / "codex-indicator.desktop"
+    return base / "autostart" / "cc-indicator.desktop"
 
 
 def linux_systemd_service_path() -> Path:
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "systemd" / "user" / "codex-indicator.service"
+    return base / "systemd" / "user" / "cc-indicator.service"
 
 
 def macos_launch_agent_path() -> Path:

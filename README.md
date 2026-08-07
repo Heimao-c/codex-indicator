@@ -4,7 +4,7 @@
 
 一个轻量的系统托盘工具，用来一眼查看多个 Codex CLI / Claude Code CLI 终端。
 
-![CC Indicator 实际运行截图](docs/codex-indicator-menu.png)
+![CC Indicator 实际运行截图](docs/cc-indicator-menu.png)
 
 ## 你能看到什么
 
@@ -67,7 +67,7 @@ Windows 解压发布包后运行 `CCIndicator/CCIndicator.exe`。macOS 解压后
 
 ## 隐私与权限
 
-Codex Indicator 不连接自己的服务器，不上传项目文件、提示词、回复、API Key 或 Codex 凭据。缓存只保存会话 ID、状态、目录、时间、进程/终端标识以及必要的标题和项目摘要。
+CC Indicator 不连接自己的服务器，不上传项目文件、提示词、回复、API Key 或 Codex 凭据。缓存只保存会话 ID、状态、目录、时间、进程/终端标识以及必要的标题和项目摘要。
 
 Ubuntu 的批量允许功能会读取当前终端画面，只在确认是 Codex 的批准界面时发送一次确认键；普通审批直接处理，整盘清除、系统目录递归删除等高危操作仍会单独询问。画面不会保存。
 
@@ -76,10 +76,10 @@ SSH 识别使用本机已有的 SSH 进程和只读探测，不保存私钥或�
 ## 命令行与开发
 
 ```bash
-codex-indicator --install-hooks
-codex-indicator --install-autostart
-codex-indicator --dump-status
-codex-indicator --doctor
+cc-indicator --install-hooks
+cc-indicator --install-autostart
+cc-indicator --dump-status
+cc-indicator --doctor
 ```
 
 运行测试：

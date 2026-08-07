@@ -8,10 +8,10 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from codex_indicator.models import SessionState, SessionStatus
-from codex_indicator.paths import claude_home
-from codex_indicator.remote import LinuxRemoteScanner
-from codex_indicator.state_store import StateStore
+from cc_indicator.models import SessionState, SessionStatus
+from cc_indicator.paths import claude_home
+from cc_indicator.remote import LinuxRemoteScanner
+from cc_indicator.state_store import StateStore
 
 
 SESSION_ID = re.compile(

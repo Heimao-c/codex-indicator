@@ -1,8 +1,8 @@
 import unittest
 
-from codex_indicator.models import SessionStatus
-from codex_indicator.presentation import session_row, shorten
-from codex_indicator.service import SessionView
+from cc_indicator.models import SessionStatus
+from cc_indicator.presentation import session_row, shorten
+from cc_indicator.service import SessionView
 
 
 class PresentationTests(unittest.TestCase):

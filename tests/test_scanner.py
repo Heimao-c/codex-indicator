@@ -6,9 +6,9 @@ import time
 import unittest
 from pathlib import Path
 
-from codex_indicator.models import SessionState, SessionStatus
-from codex_indicator.scanner import LinuxSessionScanner
-from codex_indicator.state_store import StateStore
+from cc_indicator.models import SessionState, SessionStatus
+from cc_indicator.scanner import LinuxSessionScanner
+from cc_indicator.state_store import StateStore
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux /proc semantics")
@@ -278,7 +278,7 @@ class LinuxScannerTests(unittest.TestCase):
             workspace = root / "workspace"
             self._make_agent_process(root, 1234, "claude", "42", workspace)
             claude_dir = root / "claude-home"
-            transcript = claude_dir / "projects" / "-home-phi-codex-indicator" / f"{session_id}.jsonl"
+            transcript = claude_dir / "projects" / "-home-phi-cc-indicator" / f"{session_id}.jsonl"
             transcript.parent.mkdir(parents=True)
             now = time.time()
             transcript.write_text(
@@ -313,7 +313,7 @@ class LinuxScannerTests(unittest.TestCase):
             workspace = root / "workspace"
             self._make_agent_process(root, 1234, "claude", "45", workspace)
             claude_dir = root / "claude-home"
-            project = claude_dir / "projects" / "-home-phi-codex-indicator"
+            project = claude_dir / "projects" / "-home-phi-cc-indicator"
             project.mkdir(parents=True)
             now = time.time()
             stale = project / "11111111-1111-4111-8111-111111111111.jsonl"
@@ -349,7 +349,7 @@ class LinuxScannerTests(unittest.TestCase):
             self._make_agent_process(root, 1234, "claude", "46", workspace)
             self._make_agent_process(root, 1235, "claude", "47", workspace)
             claude_dir = root / "claude-home"
-            project = claude_dir / "projects" / "-home-phi-codex-indicator"
+            project = claude_dir / "projects" / "-home-phi-cc-indicator"
             project.mkdir(parents=True)
             now = time.time()
             for session_id, offset in (
@@ -394,7 +394,7 @@ class LinuxScannerTests(unittest.TestCase):
             workspace = root / "workspace"
             workspace.mkdir()
             claude_dir = root / "claude-home"
-            project = claude_dir / "projects" / "-home-phi-codex-indicator"
+            project = claude_dir / "projects" / "-home-phi-cc-indicator"
             for directory in ("subagents", "tool-results"):
                 (project / directory).mkdir(parents=True)
                 (project / directory / "019fcc04-9328-70f2-a3e7-362473724c0d.jsonl").write_text(

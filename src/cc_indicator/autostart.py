@@ -7,8 +7,8 @@ import shutil
 import subprocess
 import sys
 
-from codex_indicator.hooks import application_argv
-from codex_indicator.paths import (
+from cc_indicator.hooks import application_argv
+from cc_indicator.paths import (
     APP_ID,
     linux_autostart_path,
     linux_systemd_service_path,
@@ -52,7 +52,7 @@ def enable(arguments: list[str] | None = None) -> None:
         import winreg
 
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
-            winreg.SetValueEx(key, "CodexIndicator", 0, winreg.REG_SZ, _windows_command(argv))
+            winreg.SetValueEx(key, "CCIndicator", 0, winreg.REG_SZ, _windows_command(argv))
         return
     if sys.platform == "darwin":
         path = macos_launch_agent_path()
@@ -98,7 +98,7 @@ def enable(arguments: list[str] | None = None) -> None:
         except FileNotFoundError:
             pass
         _systemctl("daemon-reload")
-        _systemctl("enable", "codex-indicator.service")
+        _systemctl("enable", "cc-indicator.service")
         return
     path = linux_autostart_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,7 +109,7 @@ def enable(arguments: list[str] | None = None) -> None:
             "Type=Application",
             "Name=CC Indicator",
             f"Exec={command}",
-            "Icon=codex-indicator-symbolic",
+            "Icon=cc-indicator-symbolic",
             "Terminal=false",
             "X-GNOME-Autostart-enabled=true",
             "Comment=Show and manage Codex and Claude CLI session status",
@@ -132,7 +132,7 @@ def disable() -> None:
                 0,
                 winreg.KEY_SET_VALUE,
             ) as key:
-                winreg.DeleteValue(key, "CodexIndicator")
+                winreg.DeleteValue(key, "CCIndicator")
         except FileNotFoundError:
             pass
         return
@@ -140,7 +140,7 @@ def disable() -> None:
         service = linux_systemd_service_path()
         if _systemd_available():
             try:
-                _systemctl("disable", "codex-indicator.service")
+                _systemctl("disable", "cc-indicator.service")
             except subprocess.CalledProcessError:
                 pass
             try:
@@ -166,7 +166,7 @@ def is_enabled() -> bool:
 
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
-                winreg.QueryValueEx(key, "CodexIndicator")
+                winreg.QueryValueEx(key, "CCIndicator")
             return True
         except FileNotFoundError:
             return False
@@ -174,7 +174,7 @@ def is_enabled() -> bool:
         if linux_systemd_service_path().exists() and _systemd_available():
             try:
                 result = subprocess.run(
-                    ["systemctl", "--user", "is-enabled", "codex-indicator.service"],
+                    ["systemctl", "--user", "is-enabled", "cc-indicator.service"],
                     check=False,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,

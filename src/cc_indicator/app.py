@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from codex_indicator.runtime import InstanceLock, configure_logging
+from cc_indicator.runtime import InstanceLock, configure_logging
 
 
 LOG = logging.getLogger(__name__)
@@ -18,12 +18,12 @@ def run() -> int:
     try:
         if sys.platform.startswith("linux"):
             try:
-                from codex_indicator.linux_indicator import LinuxIndicatorApp
+                from cc_indicator.linux_indicator import LinuxIndicatorApp
 
                 return LinuxIndicatorApp().run()
             except (ImportError, ValueError) as error:
                 LOG.warning("Native AppIndicator unavailable, trying portable tray: %s", error)
-        from codex_indicator.portable_tray import PortableTrayApp
+        from cc_indicator.portable_tray import PortableTrayApp
 
         return PortableTrayApp().run()
     except Exception:

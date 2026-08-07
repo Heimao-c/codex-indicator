@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codex_indicator import hooks
+from cc_indicator import hooks
 
 
 class HookConfigTests(unittest.TestCase):
@@ -36,8 +36,8 @@ class HookConfigTests(unittest.TestCase):
                 json.dumps({"env": {"ANTHROPIC_API_KEY": "sk-test"}, "model": "opus"}),
                 encoding="utf-8",
             )
-            hooks.install(codex_dir, claude_dir, command="/tmp/codex-indicator --codex-indicator-hook")
-            hooks.install(codex_dir, claude_dir, command="/tmp/codex-indicator --codex-indicator-hook")
+            hooks.install(codex_dir, claude_dir, command="/tmp/cc-indicator --cc-indicator-hook")
+            hooks.install(codex_dir, claude_dir, command="/tmp/cc-indicator --cc-indicator-hook")
 
             result = json.loads((codex_dir / "hooks.json").read_text(encoding="utf-8"))
             stop_commands = [
@@ -46,7 +46,7 @@ class HookConfigTests(unittest.TestCase):
                 for handler in group["hooks"]
             ]
             self.assertEqual(stop_commands.count("python3 existing.py"), 1)
-            self.assertEqual(stop_commands.count("/tmp/codex-indicator --codex-indicator-hook"), 1)
+            self.assertEqual(stop_commands.count("/tmp/cc-indicator --cc-indicator-hook"), 1)
             settings = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
             self.assertEqual(settings["env"]["ANTHROPIC_API_KEY"], "sk-test")
             self.assertEqual(settings["model"], "opus")
@@ -57,19 +57,19 @@ class HookConfigTests(unittest.TestCase):
     def test_claude_settings_skip_permission_request_and_use_notification(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             codex_dir, claude_dir = self._homes(temp)
-            hooks.install(codex_dir, claude_dir, command="tool --codex-indicator-hook")
+            hooks.install(codex_dir, claude_dir, command="tool --cc-indicator-hook")
             settings = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
             self.assertNotIn("PermissionRequest", settings["hooks"])
             ours = [
                 group
                 for group in settings["hooks"].get("Notification", [])
-                if any(handler["command"] == "tool --codex-indicator-hook" for handler in group["hooks"])
+                if any(handler["command"] == "tool --cc-indicator-hook" for handler in group["hooks"])
             ]
             self.assertEqual([group.get("matcher") for group in ours], ["permission_prompt|idle_prompt"])
             session_start = [
                 group
                 for group in settings["hooks"].get("SessionStart", [])
-                if any(handler["command"] == "tool --codex-indicator-hook" for handler in group["hooks"])
+                if any(handler["command"] == "tool --cc-indicator-hook" for handler in group["hooks"])
             ]
             self.assertEqual(
                 [group.get("matcher") for group in session_start],
@@ -79,7 +79,7 @@ class HookConfigTests(unittest.TestCase):
     def test_uninstall_removes_only_our_handlers(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             codex_dir, claude_dir = self._homes(temp)
-            hooks.install(codex_dir, claude_dir, command="tool --codex-indicator-hook")
+            hooks.install(codex_dir, claude_dir, command="tool --cc-indicator-hook")
             document = json.loads((codex_dir / "hooks.json").read_text(encoding="utf-8"))
             document["hooks"]["Stop"].append(
                 {"hooks": [{"type": "command", "command": "keep-me"}]}
@@ -99,7 +99,7 @@ class HookConfigTests(unittest.TestCase):
             path = codex_dir / "hooks.json"
             path.write_text("not-json", encoding="utf-8")
             with self.assertRaises(json.JSONDecodeError):
-                hooks.install(codex_dir, claude_dir, command="tool --codex-indicator-hook")
+                hooks.install(codex_dir, claude_dir, command="tool --cc-indicator-hook")
             self.assertEqual(path.read_text(encoding="utf-8"), "not-json")
 
     def test_invalid_claude_settings_is_not_overwritten(self) -> None:
@@ -108,7 +108,7 @@ class HookConfigTests(unittest.TestCase):
             path = claude_dir / "settings.json"
             path.write_text("not-json", encoding="utf-8")
             with self.assertRaises(json.JSONDecodeError):
-                hooks.install(codex_dir, claude_dir, command="tool --codex-indicator-hook")
+                hooks.install(codex_dir, claude_dir, command="tool --cc-indicator-hook")
             self.assertEqual(path.read_text(encoding="utf-8"), "not-json")
 
     def test_claude_bypass_toggle_preserves_rest_and_reverts(self) -> None:

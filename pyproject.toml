@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cc-indicator"
-version = "0.4.1"
+version = "0.4.2"
 description = "Minimal system-tray manager for local and SSH Codex CLI and Claude Code CLI sessions"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -37,7 +37,7 @@ build = [
 ]
 
 [project.scripts]
-codex-indicator = "codex_indicator.cli:main"
+cc-indicator = "cc_indicator.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Heimao-c/cc-indicator"
@@ -48,4 +48,4 @@ Source = "https://github.com/Heimao-c/cc-indicator"
 where = ["src"]
 
 [tool.setuptools.package-data]
-codex_indicator = ["assets/*.svg"]
+cc_indicator = ["assets/*.svg"]

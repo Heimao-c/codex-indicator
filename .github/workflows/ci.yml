@@ -25,18 +25,18 @@ jobs:
       - name: Compile all modules
         run: python -m compileall -q src
       - name: CLI doctor
-        run: python -m codex_indicator --doctor
+        run: python -m cc_indicator --doctor
 
   ubuntu-package:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Build deb
-        run: sh scripts/build-deb.sh 0.4.1 amd64
+        run: sh scripts/build-deb.sh 0.4.2 amd64
       - name: Inspect deb
         run: |
-          dpkg-deb --info dist/cc-indicator_0.4.1_amd64.deb
-          dpkg-deb --contents dist/cc-indicator_0.4.1_amd64.deb
+          dpkg-deb --info dist/cc-indicator_0.4.2_amd64.deb
+          dpkg-deb --contents dist/cc-indicator_0.4.2_amd64.deb
 
   windows-package:
     runs-on: windows-latest
@@ -49,8 +49,8 @@ jobs:
       - name: Build and smoke-test executables
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --windowed --onedir --name CCIndicator --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets;codex_indicator/assets" src/codex_indicator/__main__.py
-          pyinstaller --noconfirm --clean --console --onedir --name CCIndicatorHook --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets;codex_indicator/assets" src/codex_indicator/__main__.py
+          pyinstaller --noconfirm --clean --windowed --onedir --name CCIndicator --paths src --collect-submodules pystray --add-data "src/cc_indicator/assets;cc_indicator/assets" src/cc_indicator/__main__.py
+          pyinstaller --noconfirm --clean --console --onedir --name CCIndicatorHook --paths src --collect-submodules pystray --add-data "src/cc_indicator/assets;cc_indicator/assets" src/cc_indicator/__main__.py
           if (-not (Test-Path dist/CCIndicator/CCIndicator.exe)) { throw "Tray executable was not built" }
           & dist/CCIndicatorHook/CCIndicatorHook.exe --version
 
@@ -72,7 +72,7 @@ jobs:
       - run: python -m pip install ".[build]"
       - name: Build and smoke-test application
         run: |
-          pyinstaller --noconfirm --clean --windowed --onedir --name CCIndicator --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets:codex_indicator/assets" src/codex_indicator/__main__.py
-          pyinstaller --noconfirm --clean --console --onedir --name CCIndicatorHook --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets:codex_indicator/assets" src/codex_indicator/__main__.py
+          pyinstaller --noconfirm --clean --windowed --onedir --name CCIndicator --paths src --collect-submodules pystray --add-data "src/cc_indicator/assets:cc_indicator/assets" src/cc_indicator/__main__.py
+          pyinstaller --noconfirm --clean --console --onedir --name CCIndicatorHook --paths src --collect-submodules pystray --add-data "src/cc_indicator/assets:cc_indicator/assets" src/cc_indicator/__main__.py
           test -d dist/CCIndicator.app
           dist/CCIndicatorHook/CCIndicatorHook --version

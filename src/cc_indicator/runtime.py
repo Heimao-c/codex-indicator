@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import IO
 
-from codex_indicator.paths import app_log_path, lock_path
+from cc_indicator.paths import app_log_path, lock_path
 
 
 def configure_logging(path: Path | None = None) -> None:

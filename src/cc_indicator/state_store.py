@@ -8,9 +8,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
-from codex_indicator.models import SessionState, SessionStatus, status_for_event
-from codex_indicator.paths import session_state_dir
-from codex_indicator.processes import find_agent_ancestor, pid_is_alive, terminal_identity
+from cc_indicator.models import SessionState, SessionStatus, status_for_event
+from cc_indicator.paths import session_state_dir
+from cc_indicator.processes import find_agent_ancestor, pid_is_alive, terminal_identity
 
 
 SAFE_ID = re.compile(r"[^A-Za-z0-9._-]")

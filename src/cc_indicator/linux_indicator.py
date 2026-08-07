@@ -5,12 +5,12 @@ import logging
 from importlib.resources import as_file, files
 from typing import Callable
 
-from codex_indicator import __version__
-from codex_indicator import autostart, hooks
-from codex_indicator.i18n import COLOR_SYMBOLS, STATUS_COLORS, text
-from codex_indicator.models import SessionStatus
-from codex_indicator.presentation import session_row, shorten
-from codex_indicator.service import SessionService, SessionView
+from cc_indicator import __version__
+from cc_indicator import autostart, hooks
+from cc_indicator.i18n import COLOR_SYMBOLS, STATUS_COLORS, text
+from cc_indicator.models import SessionStatus
+from cc_indicator.presentation import session_row, shorten
+from cc_indicator.service import SessionService, SessionView
 
 
 LOG = logging.getLogger(__name__)
@@ -30,11 +30,11 @@ class LinuxIndicatorApp:
         self.service = service or SessionService()
         self._fingerprint: tuple[tuple[object, ...], ...] | None = None
         self._message = ""
-        self._asset_context = as_file(files("codex_indicator.assets"))
+        self._asset_context = as_file(files("cc_indicator.assets"))
         self._asset_dir = self._asset_context.__enter__()
         self.indicator = AyatanaAppIndicator3.Indicator.new(
-            "codex-indicator",
-            "codex-indicator-symbolic",
+            "cc-indicator",
+            "cc-indicator-symbolic",
             AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )
         self.indicator.set_icon_theme_path(str(self._asset_dir))
@@ -339,13 +339,13 @@ class LinuxIndicatorApp:
         label = " CC " + summary
         self.indicator.set_label(label, f"CC Indicator · {summary}")
         icon = (
-            "codex-indicator-attention"
+            "cc-indicator-attention"
             if attention
-            else "codex-indicator-working"
+            else "cc-indicator-working"
             if working
-            else "codex-indicator-done"
+            else "cc-indicator-done"
             if done
-            else "codex-indicator-idle"
+            else "cc-indicator-idle"
         )
         self.indicator.set_icon_full(icon, "CC Indicator")
 
