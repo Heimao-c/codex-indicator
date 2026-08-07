@@ -20,18 +20,18 @@ jobs:
       - name: Build tray and hook executables
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --windowed --onedir --name CodexIndicator --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets;codex_indicator/assets" src/codex_indicator/__main__.py
-          pyinstaller --noconfirm --clean --console --onedir --name CodexIndicatorHook --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets;codex_indicator/assets" src/codex_indicator/__main__.py
-          if (-not (Test-Path dist/CodexIndicator/CodexIndicator.exe)) { throw "Tray executable was not built" }
-          & dist/CodexIndicatorHook/CodexIndicatorHook.exe --version
+          pyinstaller --noconfirm --clean --windowed --onedir --name CCIndicator --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets;codex_indicator/assets" src/codex_indicator/__main__.py
+          pyinstaller --noconfirm --clean --console --onedir --name CCIndicatorHook --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets;codex_indicator/assets" src/codex_indicator/__main__.py
+          if (-not (Test-Path dist/CCIndicator/CCIndicator.exe)) { throw "Tray executable was not built" }
+          & dist/CCIndicatorHook/CCIndicatorHook.exe --version
           New-Item -ItemType Directory -Path bundle
-          Move-Item dist/CodexIndicator bundle/CodexIndicator
-          Move-Item dist/CodexIndicatorHook bundle/CodexIndicatorHook
-          Compress-Archive -Path bundle/* -DestinationPath codex-indicator-windows-x64.zip
+          Move-Item dist/CCIndicator bundle/CCIndicator
+          Move-Item dist/CCIndicatorHook bundle/CCIndicatorHook
+          Compress-Archive -Path bundle/* -DestinationPath cc-indicator-windows-x64.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: codex-indicator-windows-x64
-          path: codex-indicator-windows-x64.zip
+          name: cc-indicator-windows-x64
+          path: cc-indicator-windows-x64.zip
 
   build-macos:
     strategy:
@@ -51,18 +51,18 @@ jobs:
       - run: python -m pip install ".[build]"
       - name: Build menu-bar app and hook executable
         run: |
-          pyinstaller --noconfirm --clean --windowed --onedir --name CodexIndicator --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets:codex_indicator/assets" src/codex_indicator/__main__.py
-          pyinstaller --noconfirm --clean --console --onedir --name CodexIndicatorHook --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets:codex_indicator/assets" src/codex_indicator/__main__.py
-          test -d dist/CodexIndicator.app
-          dist/CodexIndicatorHook/CodexIndicatorHook --version
+          pyinstaller --noconfirm --clean --windowed --onedir --name CCIndicator --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets:codex_indicator/assets" src/codex_indicator/__main__.py
+          pyinstaller --noconfirm --clean --console --onedir --name CCIndicatorHook --paths src --collect-submodules pystray --add-data "src/codex_indicator/assets:codex_indicator/assets" src/codex_indicator/__main__.py
+          test -d dist/CCIndicator.app
+          dist/CCIndicatorHook/CCIndicatorHook --version
           mkdir bundle
-          mv dist/CodexIndicator.app bundle/
-          mv dist/CodexIndicatorHook bundle/
-          ditto -c -k --sequesterRsrc --keepParent bundle codex-indicator-macos-${{ matrix.architecture }}.zip
+          mv dist/CCIndicator.app bundle/
+          mv dist/CCIndicatorHook bundle/
+          ditto -c -k --sequesterRsrc --keepParent bundle cc-indicator-macos-${{ matrix.architecture }}.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: codex-indicator-macos-${{ matrix.architecture }}
-          path: codex-indicator-macos-${{ matrix.architecture }}.zip
+          name: cc-indicator-macos-${{ matrix.architecture }}
+          path: cc-indicator-macos-${{ matrix.architecture }}.zip
 
   build-ubuntu:
     runs-on: ubuntu-22.04
@@ -72,7 +72,7 @@ jobs:
         run: sh scripts/build-deb.sh "${GITHUB_REF_NAME#v}" amd64
       - uses: actions/upload-artifact@v4
         with:
-          name: codex-indicator-ubuntu-amd64
+          name: cc-indicator-ubuntu-amd64
           path: dist/*.deb
 
   publish:
@@ -81,7 +81,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: codex-indicator-*
+          pattern: cc-indicator-*
           path: release
           merge-multiple: true
       - uses: softprops/action-gh-release@v2

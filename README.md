@@ -43,7 +43,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 \
   libayatana-appindicator3-1 libx11-6 libxtst6 x11-utils
 ```
 
-Windows 解压发布包后运行 `CodexIndicator/CodexIndicator.exe`。macOS 解压后将 `.app` 和 `CodexIndicatorHook` 放在同一目录，再启动 `.app`。
+Windows 解压发布包后运行 `CCIndicator/CCIndicator.exe`。macOS 解压后将 `.app` 和 `CCIndicatorHook` 放在同一目录，再启动 `.app`。
 
 首次运行后，从托盘菜单安装 Codex + Claude Hooks：Codex 的 Hook 写入 `~/.codex/hooks.json`，Claude Code 的 Hook 写入 `~/.claude/settings.json`（保留你已有的配置，Claude Code 会自动热加载）。在 Codex CLI 中打开 `/hooks`，确认并信任指向本机的 Hook；未信任时，工具只能显示被动扫描到的部分状态。
 

@@ -103,10 +103,11 @@ def set_claude_bypass(enabled: bool, claude_dir: Path | None = None) -> bool:
 def _frozen_hook_helper() -> Path | None:
     executable = Path(sys.executable).resolve()
     suffix = ".exe" if sys.platform == "win32" else ""
-    helper_name = f"CodexIndicatorHook{suffix}"
-    candidates = [executable.with_name(helper_name)]
+    helper_names = [f"CCIndicatorHook{suffix}", f"CodexIndicatorHook{suffix}"]
+    candidates = [executable.with_name(name) for name in helper_names]
     for ancestor in list(executable.parents)[:5]:
-        candidates.append(ancestor / "CodexIndicatorHook" / helper_name)
+        for name in helper_names:
+            candidates.append(ancestor / name)
     return next((path for path in candidates if path.is_file()), None)
 
 
